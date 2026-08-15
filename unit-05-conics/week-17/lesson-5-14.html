@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-14</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-14</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-14</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Eccentricity: One Family, One Number (Honors Extension)</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to compute the eccentricity of any conic from its equation, and predict a conic's type from its eccentricity alone.</p></li>
+        <li><p>I will be able to explain how the focus&ndash;directrix property makes circle, ellipse, parabola, and hyperbola one family, sorted by a single number.</p></li>
+        <li><p>I will be able to interpret eccentricity as shape &mdash; from Earth's nearly circular orbit to a comet's long ellipse &mdash; and compute orbital extremes from \(a\) and \(e\).</p></li>
+        <li><p>I will be able to derive a conic's equation directly from a focus, a directrix, and an eccentricity, and verify the result by completing the square.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Eccentricity</strong>: The number \(e\) that measures a conic's shape &mdash; for ellipses and hyperbolas, \(e = \frac{c}{a}\), the distance to the focus as a fraction of the distance to the vertex. From Latin <em>ex centro</em>, "out of center": how far the focus has strayed from the middle.</p>
+    <p><strong>Focus&ndash;directrix property</strong>: The unifying definition &mdash; a conic is the set of points whose distance to a fixed <strong>focus</strong> is exactly \(e\) times their distance to a fixed line, the <strong>directrix</strong>.</p>
+    <p><strong>Directrix (generalized)</strong>: Until now a private possession of the parabola; today, every non-circular conic gets one (ellipses and hyperbolas get two, one per focus).</p>
+    <p><strong>Semi-major axis</strong>: The distance \(a\) from an ellipse's center to a vertex &mdash; in orbital language, the orbit's average scale, partnered with \(e\) to give perihelion \(a(1-e)\) and aphelion \(a(1+e)\).</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>The names you have used all unit are twenty-two centuries old, and they hide today's lesson inside them. When Apollonius of Perga organized the conics around 200 BC, he named them with the Greek of comparison: <em>elleipsis</em>, "falling short"; <em>parabol&emacr;</em>, "exact application," a perfect match; <em>hyperbol&emacr;</em>, "excess," an overshooting (the same word English borrowed for exaggeration). He was describing a comparison of areas in his own construction &mdash; but the names turned out to be prophecy. There is a single number attached to every conic, its <strong>eccentricity</strong> \(e\), and the whole family sorts itself by exactly Apollonius's trichotomy: falling short of 1, equal to 1, exceeding 1. Eighteen centuries later, Johannes Kepler &mdash; the man who coined the word <em>focus</em> (Latin for "hearth") in 1604 &mdash; saw what the number meant physically, and argued that the conics form one continuous family: nudge an ellipse's eccentricity upward and it stretches, at \(e = 1\) it breaks open into a parabola, and past 1 it splits into a hyperbola. One family. One number. Today you learn to read it.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Number and the Trichotomy</strong></h4>
+        <p>For an ellipse or hyperbola with center-to-vertex distance \(a\) and center-to-focus distance \(c\):</p>
+        <p style="text-align: center;">\(e = \dfrac{c}{a}\)</p>
+        <p>For the ellipse, \(c^2 = a^2 - b^2\), so \(c < a\) and \(0 \le e < 1\). For the hyperbola, \(c^2 = a^2 + b^2\), so \(c > a\) and \(e > 1\). The parabola takes the boundary value \(e = 1\), and the circle is the ellipse with its foci collapsed to the center: \(c = 0\), \(e = 0\).</p>
+        <ul>
+            <li>\(e = 0\) &mdash; <strong>circle</strong> (the focus sits dead center)</li>
+            <li>\(0 < e < 1\) &mdash; <strong>ellipse</strong> (falling short &mdash; <em>elleipsis</em>)</li>
+            <li>\(e = 1\) &mdash; <strong>parabola</strong> (the exact boundary &mdash; <em>parabol&emacr;</em>)</li>
+            <li>\(e > 1\) &mdash; <strong>hyperbola</strong> (excess &mdash; <em>hyperbol&emacr;</em>)</li>
+        </ul>
+        <p style="margin-bottom: 0;">The deeper unity is the <strong>focus&ndash;directrix property</strong>: every non-circular conic is the set of points \(P\) with \(\dfrac{PF}{Pd} = e\), where \(PF\) is the distance to a focus and \(Pd\) the distance to a fixed line. The parabola you derived as a locus in Lesson 5-3 was the case \(e = 1\), where the two distances match exactly &mdash; you have been using this property all along without knowing it was a family trait. (The circle joins the family as the limiting case \(e \to 0\), its directrix retreating to infinity as the focus settles into the center &mdash; a limit, and an honest one.)</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Two ellipses share the same width: \(\dfrac{x^2}{25} + \dfrac{y^2}{9} = 1\) and \(\dfrac{x^2}{25} + \dfrac{y^2}{24} = 1\). Compute each eccentricity and compare the shapes.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Both have \(a^2 = 25\), so \(a = 5\). For the first: \(c^2 = a^2 - b^2 = 25 - 9 = 16\), so \(c = 4\) and \(e = \frac{4}{5} = 0.8\). For the second: \(c^2 = 25 - 24 = 1\), so \(c = 1\) and \(e = \frac{1}{5} = 0.2\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Same \(a\), utterly different characters. At \(e = 0.8\) the foci sit 80% of the way to the vertices and the ellipse is a drawn-out oval; at \(e = 0.2\) they huddle near the center and the curve is nearly a circle &mdash; you would need a ruler to distinguish it from one by eye. Eccentricity measures <em>shape, not size</em>: a dinner plate and a stadium can share \(e\), while these two same-width ellipses do not.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Find the eccentricity of the hyperbola \(\dfrac{x^2}{9} - \dfrac{y^2}{16} = 1\), and explain why <em>no</em> hyperbola can have \(e \le 1\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Here \(a^2 = 9\) and \(b^2 = 16\), and the hyperbola's Pythagorean relation is the <em>sum</em>: \(c^2 = a^2 + b^2 = 9 + 16 = 25\), so \(c = 5\) and</p>
+    <p style="text-align: center;">\(e = \dfrac{c}{a} = \dfrac{5}{3} \approx 1.67\)</p>
+    <p>Why must this exceed 1? Because \(c^2 = a^2 + b^2\) with \(b^2 > 0\) forces \(c > a\) for <em>every</em> hyperbola ever written &mdash; the foci live beyond the vertices by construction. The bound is not a habit of examples; it is a consequence of the definition.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(e = \frac{5}{3}\). And the bound works as a free error detector: if a computation ever hands you a "hyperbola" with \(e < 1\) or an "ellipse" with \(e > 1\), the classification itself is telling you an arithmetic crime has occurred upstream. Let it testify.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Halley's comet rides an ellipse with semi-major axis \(a = 17.8\) AU and eccentricity \(e = 0.967\), the sun at one focus. Find its closest and farthest distances from the sun.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The sun sits at a focus, a distance \(c = ae\) from the center. The closest approach (perihelion) is vertex-to-focus, and the farthest (aphelion) is the opposite vertex to that same focus:</p>
+    <p style="text-align: center;">\(\text{perihelion} = a - c = a(1 - e) = 17.8(1 - 0.967) = 17.8(0.033) \approx 0.59 \text{ AU}\)</p>
+    <p style="text-align: center;">\(\text{aphelion} = a + c = a(1 + e) = 17.8(1.967) \approx 35.01 \text{ AU}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The comet swings inside Venus's orbit (about 0.59 AU, closer to the sun than Earth ever goes) and then retreats beyond Neptune (about 35 AU) &mdash; a sixty-fold swing in distance encoded in the single fact \(e = 0.967\). Compare Earth: \(e = 0.0167\), an orbit so nearly circular that drawn to scale on this page, your eye could not tell. One number separates a home from an odyssey.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p><em>(Honors derivation.)</em> Find the conic with focus at the origin, directrix \(x = 4\), and eccentricity \(e = \tfrac{1}{2}\) &mdash; predicting its type first, then deriving and verifying its equation.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Predict:</strong> \(e = \tfrac{1}{2} < 1\): the trichotomy promises an ellipse before we lift a pencil.</p>
+    <p><strong>Derive.</strong> A point \(P(x, y)\) belongs exactly when \(PF = \tfrac{1}{2} \, Pd\):</p>
+    <p style="text-align: center;">\(\sqrt{x^2 + y^2} = \tfrac{1}{2}\,|x - 4|\)</p>
+    <p style="text-align: center;">\(x^2 + y^2 = \tfrac{1}{4}(x - 4)^2 = \tfrac{1}{4}\left(x^2 - 8x + 16\right)\)</p>
+    <p style="text-align: center;">\(4x^2 + 4y^2 = x^2 - 8x + 16 \;\;\Rightarrow\;\; 3x^2 + 8x + 4y^2 = 16\)</p>
+    <p><strong>Now the master key of the unit &mdash; complete the square:</strong></p>
+    <p style="text-align: center;">\(3\left(x^2 + \tfrac{8}{3}x\right) + 4y^2 = 16 \;\;\Rightarrow\;\; 3\left(x + \tfrac{4}{3}\right)^2 - \tfrac{16}{3} + 4y^2 = 16\)</p>
+    <p style="text-align: center;">\(3\left(x + \tfrac{4}{3}\right)^2 + 4y^2 = \tfrac{64}{3} \;\;\Rightarrow\;\; \dfrac{\left(x + \frac{4}{3}\right)^2}{64/9} + \dfrac{y^2}{16/3} = 1\)</p>
+    <p><strong>Verify against the promise.</strong> An ellipse indeed, with \(a^2 = \tfrac{64}{9}\) and \(b^2 = \tfrac{16}{3}\), so \(a = \tfrac{8}{3}\) and \(c^2 = a^2 - b^2 = \tfrac{64}{9} - \tfrac{48}{9} = \tfrac{16}{9}\), giving \(c = \tfrac{4}{3}\). Then \(e = \frac{c}{a} = \frac{4/3}{8/3} = \tfrac{1}{2}\) &#10003; &mdash; and the center is \(\left(-\tfrac{4}{3}, 0\right)\), so the right focus sits at \(-\tfrac{4}{3} + \tfrac{4}{3} = 0\): the origin, exactly where we posted it &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{\left(x + \frac{4}{3}\right)^2}{64/9} + \dfrac{y^2}{16/3} = 1\). One locus condition in, one completed square later, out comes an ellipse wearing precisely the \(e\) and the focus it was ordered with. The focus&ndash;directrix definition is not a curiosity &mdash; it <em>manufactures</em> conics to specification, and completing the square reads the label.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Reading \(e\) at a Glance</strong></h4>
+        <ul>
+            <li><strong>Ellipse:</strong> as \(e \to 0\) the foci sink into the center and the curve rounds toward a circle; as \(e \to 1\) the foci flee toward the vertices and the ellipse stretches long and thin. Planets live near 0; comets near 1.</li>
+            <li><strong>Parabola:</strong> \(e = 1\), always and exactly &mdash; every parabola has the same shape, differing only in scale. There is no such thing as a "rounder" parabola, only a closer one.</li>
+            <li><strong>Hyperbola:</strong> for a fixed \(a\), larger \(e\) means larger \(b\) and steeper asymptotes &mdash; branches that open wider. Just past \(e = 1\), the branches hug the axis, nearly parabolic; at great \(e\) they flatten toward a pair of crossed lines.</li>
+        </ul>
+        <p style="margin-bottom: 0;">Shape, not size. Two conics with equal \(e\) are magnifications of one another &mdash; which is why a single number can describe both a whispering gallery and a planetary orbit.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: The Whole Family on One Slider</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), build the focus&ndash;directrix definition itself:</p>
+        <ol>
+            <li>Type <strong>sqrt(x^2 + y^2) = E * |x - 4|</strong> and let Desmos create a slider for \(E\). Set its range from 0.1 to 3, step 0.01. You have just graphed "distance to the origin equals \(E\) times distance to the line \(x = 4\)" &mdash; the family's definition, verbatim.</li>
+            <li>Add the focus &mdash; plot the point \((0, 0)\) &mdash; and the directrix, <strong>x = 4</strong>, so you can see who is commanding the curve.</li>
+            <li>Drag \(E\) slowly upward from 0.1: a small egg swells into a longer and longer ellipse. Watch what happens as \(E\) crosses <strong>exactly 1</strong>: the far end of the ellipse sprints off the screen and the curve breaks open &mdash; a parabola for one perfect instant &mdash; then a second branch appears on the far side of the directrix. You have watched an ellipse become a parabola become a hyperbola without changing anything but one number.</li>
+            <li>Park \(E\) at 0.5 and compare the picture to your Example 4 derivation &mdash; same focus, same directrix, same ellipse. The slider shows the family; your algebra names the member. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE IMPOSSIBLE ECCENTRICITY</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student asked an AI for the eccentricity of the hyperbola \(\dfrac{x^2}{16} - \dfrac{y^2}{9} = 1\). It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;Here a&sup2; = 16 and b&sup2; = 9, so c&sup2; = a&sup2; &minus; b&sup2; = 16 &minus; 9 = 7, giving c = &radic;7. <strong>The eccentricity is e = &radic;7/4 &asymp; 0.66.</strong>&rdquo;</p>
+            <p>You do not need to redo the arithmetic to know this is wrong &mdash; the answer convicts itself. The equation is a hyperbola (that minus sign between the squared terms is its signature), and <em>every</em> hyperbola has \(e > 1\); an eccentricity of 0.66 belongs to an ellipse. The machine reached for the ellipse's relation \(c^2 = a^2 - b^2\) when the hyperbola demands the sum: \(c^2 = 16 + 9 = 25\), \(c = 5\), and \(e = \frac{5}{4}\) &mdash; safely in excess of 1, as Apollonius's name promised.</p>
+            <p style="margin-bottom: 0;">This is the lesson's bound working as a smoke detector: the classification limits (\(e < 1\) ellipse, \(e > 1\) hyperbola) cost nothing to check and catch a whole species of formula mix-ups. Before you accept any eccentricity &mdash; yours, a book's, or a machine's &mdash; ask the one free question: <em>is this number even legal for this curve?</em></p>
+        </div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Compute the eccentricity of \(\frac{x^2}{49} + \frac{y^2}{33} = 1\), and say in one sentence what the number tells you about the shape.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(a^2 = 49\), \(b^2 = 33\): \(c^2 = 49 - 33 = 16\), so \(c = 4\) and \(e = \frac{4}{7} \approx 0.57\). A middling ellipse &mdash; visibly oval (the foci sit a bit past halfway to the vertices), but nowhere near the drawn-out shape of a comet's \(e \approx 0.97\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Find the eccentricity of \(\frac{y^2}{4} - \frac{x^2}{21} = 1\); then classify sight-unseen the conics with \(e = 0\), \(e = 0.31\), \(e = 1\), and \(e = 2.4\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Hyperbola with vertical transverse axis: \(a^2 = 4\), \(b^2 = 21\), so \(c^2 = 4 + 21 = 25\), \(c = 5\), and \(e = \frac{5}{2}\) &mdash; legal, since \(2.5 > 1\). Classifications: \(e = 0\) circle; \(e = 0.31\) ellipse (modestly oval); \(e = 1\) parabola, exactly; \(e = 2.4\) hyperbola with wide-opening branches.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Using \(c^2 = a^2 - b^2\) on a hyperbola. The ellipse subtracts because its foci live <em>inside</em>, short of the vertices; the hyperbola adds &mdash; \(c^2 = a^2 + b^2\) &mdash; because its foci live <em>beyond</em> them. Mix the two and your eccentricity lands on the wrong side of 1, claiming an impossible curve. The remedy is the free check from the AI box: an ellipse's \(e\) must fall short of 1 and a hyperbola's must exceed it &mdash; Apollonius put the rule <em>in the names</em>, so let the name audit the number every time.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Kepler found the ellipse the hard way. Working through Tycho Brahe's observations of Mars &mdash; eccentricity just 0.093, an orbit your eye would call a circle &mdash; he found the best circular model missed by a mere eight minutes of arc, about a quarter of the full moon's width. A lesser astronomer would have shrugged. Kepler trusted the data over the two-thousand-year-old assumption of perfect circles, fought what he called his "war with Mars" for years, and in 1609 announced that planets ride ellipses with the sun at one focus. The whole heliocentric revolution turned on an eccentricity barely distinguishable from zero &mdash; and on one man's refusal to round it off.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The unit began with a plane slicing a cone into four apparently different curves; today the four closed ranks into one family, sorted by one number. Eccentricity measures how far the focus has strayed from the center &mdash; \(e = 0\) a circle, short of 1 an ellipse, exactly 1 a parabola, in excess a hyperbola &mdash; and Apollonius's twenty-two-century-old names turn out to describe precisely this trichotomy. You watched the whole family morph on a single Desmos slider, manufactured an ellipse to specification from a focus, a directrix, and the number \(\frac{1}{2}\), and let the classification bounds catch a machine holding the wrong formula. Tomorrow the family goes to work: the unit's capstone hands you an engineering brief and asks you to choose the right conic and <em>defend the choice in writing</em>, with your computed evidence on the table. Every curve in the family serves something; tomorrow you argue which servant the job requires.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Apollonius named the conics for "falling short," "exact," and "excess" centuries before eccentricity was defined. What exactly does each name fall short of or exceed &mdash; and why is it satisfying that the names still fit?</p>
+    <p>2. Why does \(c^2 = a^2 - b^2\) force every ellipse's eccentricity below 1, while \(c^2 = a^2 + b^2\) forces every hyperbola's above it? What geometric fact about the foci do the two formulas encode?</p>
+    <p>3. Eccentricity measures shape and ignores size. Why is that separation exactly what an astronomer needs &mdash; and what second number completes the description of an orbit?</p>
+    <p>4. In the Desmos exploration, the parabola existed for only a single instant of the slider's journey. What does that fragility say about why parabolic orbits are the rarest kind in the solar system?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-14 &middot; Eccentricity: One Family, One Number (Honors Extension)</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

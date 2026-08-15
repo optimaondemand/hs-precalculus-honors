@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 2-5</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 2</div>
+        <div style="font-size: 13px; color: #666;">Polynomial and Rational Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">2-5</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polynomial and Rational Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">2-5</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Complex and Repeated Zeros; Building Polynomials</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to use the Conjugate Pairs Theorem to find the remaining zeros of a polynomial when a complex zero is given, and explain why complex zeros of real polynomials must come in pairs.</p></li>
+        <li><p>I will be able to construct a polynomial to order from a list of zeros (real, repeated, or complex) and one additional point.</p></li>
+        <li><p>I will be able to sketch a polynomial from factored form, combining end behavior and multiplicity into one coherent graph.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Complex conjugate</strong>: The conjugate of \(a + bi\) is \(a - bi\) &mdash; same real part, opposite imaginary part.</p>
+    <p><strong>Conjugate Pairs Theorem</strong>: If a polynomial has <em>real</em> coefficients and \(a + bi\) is a zero (with \(b \neq 0\)), then \(a - bi\) is also a zero.</p>
+    <p><strong>Repeated zero</strong>: A zero of multiplicity 2 or more &mdash; its factor appears more than once (Lesson 2-2's touch-and-flatten behavior).</p>
+    <p><strong>Irreducible quadratic factor</strong>: A quadratic factor with no real zeros (negative discriminant); over the real numbers it will not break into linear pieces.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>When Cardano's cubic formula was applied to certain equations, something scandalous happened: square roots of negative numbers appeared in the middle of the computation &mdash; and then, if one had the nerve to keep calculating with them, they <em>cancelled</em>, leaving perfectly ordinary real answers. Rafael Bombelli, a Bolognese engineer, had that nerve. In 1572 he worked out the arithmetic of these &ldquo;impossible&rdquo; quantities and called his own idea &ldquo;a wild thought.&rdquo; The full story of complex numbers &mdash; their plane, their geometry, their courage &mdash; is Unit 9's to tell. Today we need just one of their habits, and it is a habit of scrupulous honesty: <strong>in any polynomial with real coefficients, complex zeros never appear alone.</strong> Each one arrives with its mirror image, and the pair does its work jointly and invisibly.</p>
+    <p>Why must they pair up? Here is the shape of the argument. Complex conjugation &mdash; flipping \(i\) to \(-i\) &mdash; respects addition and multiplication: the conjugate of a sum is the sum of the conjugates, and likewise for products. Now take a polynomial \(f\) whose coefficients are all real, and suppose \(f(z) = 0\). Conjugate the entire equation. Every coefficient, being real, is its own conjugate &mdash; the polynomial passes through the mirror unchanged &mdash; while \(z\) becomes \(\bar{z}\). The equation that comes out the other side reads \(f(\bar{z}) = 0\). The mirror image of a zero is a zero. \(\blacksquare\)</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Conjugate Pairs Theorem &mdash; and What a Pair Builds</strong></h4>
+        <p>If \(f\) has real coefficients and \(a + bi\) is a zero (\(b \neq 0\)), then \(a - bi\) is a zero too. Multiplying the pair's factors always produces a quadratic with <em>real</em> coefficients:</p>
+        <p style="text-align: center;">\(\large \big(x - (a+bi)\big)\big(x - (a-bi)\big) = (x - a)^2 + b^2 = x^2 - 2ax + (a^2 + b^2)\)</p>
+        <p style="margin-bottom: 0;">This is how a real polynomial keeps complex zeros without showing complex coefficients: it carries them inside <strong>irreducible quadratic factors</strong>. Over the real numbers, every polynomial factors into linear pieces (one per real zero) and irreducible quadratics (one per conjugate pair) &mdash; nothing else. The graph shows the linear factors as intercepts; the quadratic factors leave no mark on the axis at all.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Given that \(2 + 2i\) is a zero of \(f(x) = x^4 - 10x^3 + 37x^2 - 68x + 40\), find all zeros.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>By the Conjugate Pairs Theorem, \(2 - 2i\) is also a zero. Build the real quadratic the pair generates, using the boxed identity with \(a = 2, b = 2\):</p>
+    <p style="text-align: center;">\((x-2)^2 + 4 = x^2 - 4x + 8\)</p>
+    <p>Divide it out of \(f\) by long division:</p>
+    <p style="text-align: center;">\(x^4 - 10x^3 + 37x^2 - 68x + 40 = (x^2 - 4x + 8)\,q(x)\)</p>
+    <p>First term: \(x^2\). Multiply and subtract: \(x^2(x^2-4x+8) = x^4 - 4x^3 + 8x^2\), leaving \(-6x^3 + 29x^2 - 68x + 40\).</p>
+    <p>Next term: \(-6x\). Multiply and subtract: \(-6x(x^2-4x+8) = -6x^3 + 24x^2 - 48x\), leaving \(5x^2 - 20x + 40\).</p>
+    <p>Next term: \(+5\). Multiply and subtract: \(5(x^2 - 4x + 8) = 5x^2 - 20x + 40\), leaving \(0\) &mdash; remainder zero, as the Factor Theorem demands.</p>
+    <p>So \(q(x) = x^2 - 6x + 5 = (x-1)(x-5)\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The zeros are \(2 + 2i, \; 2 - 2i, \; 1, \; 5\) &mdash; four zeros for degree 4, the FTA ledger balanced. Notice what the graph of \(f\) shows: intercepts at 1 and 5 only. The complex pair works underground, shaping the curve's height between the intercepts without ever touching the axis.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Expanding the conjugate-pair product by brute FOIL and mangling the \(i^2\) terms. Use the identity instead: the pair \(a \pm bi\) <em>always</em> produces \((x-a)^2 + b^2\) &mdash; sum of squares, plus sign. Writing \((x-2)^2 - 4\) instead of \((x-2)^2 + 4\) for the pair \(2 \pm 2i\) silently converts your complex pair into the real zeros \(0\) and \(4\), and everything downstream is fiction. Check the discriminant of your quadratic: if it isn't negative, it doesn't hold a complex pair.</div>
+    </div>
+
+    <p>Now reverse the whole unit's direction. So far, polynomials have been handed to us and interrogated for zeros. But engineers, physicists, and test-writers constantly do the opposite: they know where a system must vanish and need the polynomial that does it. The Linear Factorization Theorem makes this construction almost mechanical &mdash; with one degree of freedom left over, the stretch factor \(a\), which a single extra point pins down.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: Building a Polynomial to Order</strong></h4>
+        <ol>
+            <li><strong>One factor per zero:</strong> a zero \(c\) of multiplicity \(m\) contributes \((x - c)^m\); a complex zero contributes its conjugate too (jointly: \((x-a)^2 + b^2\)).</li>
+            <li><strong>Check the degree:</strong> multiplicities must total the required degree &mdash; if they don't, the zero list and the degree are in contradiction, and honesty requires saying so.</li>
+            <li><strong>Attach the stretch factor:</strong> \(f(x) = a \cdot (\text{product of factors})\), then use the given point to solve for \(a\).</li>
+            <li><strong>Verify</strong> against every given fact &mdash; each zero and the point.</li>
+        </ol>
+        <p style="margin-bottom: 0;">Without the extra point, infinitely many polynomials share the same zeros &mdash; every vertical stretch of the graph. The zeros are the skeleton; the point puts flesh at one location, and that is enough to determine all of it.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Find the degree-3 polynomial with real coefficients that has zeros \(-1\) and \(2i\), and satisfies \(f(0) = 8\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The zero \(2i = 0 + 2i\) drags in its conjugate \(-2i\) &mdash; that is not optional if the coefficients are to be real. Zeros: \(-1, 2i, -2i\); multiplicities \(1+1+1 = 3\) &#10003;. The complex pair builds \((x - 0)^2 + 2^2 = x^2 + 4\):</p>
+    <p style="text-align: center;">\(f(x) = a(x + 1)(x^2 + 4)\)</p>
+    <p>Pin down \(a\) with the point:</p>
+    <p style="text-align: center;">\(f(0) = a(1)(4) = 4a = 8\)</p>
+    <p style="text-align: center;">\(a = 2\)</p>
+    <p>Expand: \(f(x) = 2(x+1)(x^2+4) = 2x^3 + 2x^2 + 8x + 8\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(f(x) = 2x^3 + 2x^2 + 8x + 8\). Verify: \(f(-1) = -2 + 2 - 8 + 8 = 0\) &#10003;; \(f(0) = 8\) &#10003;; and \(f(2i) = 2(8i^3)+2(4i^2)+16i+8 = -16i - 8 + 16i + 8 = 0\) &#10003;. Real coefficients throughout &mdash; the conjugate pair kept its bargain.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Find the degree-3 polynomial with a zero of multiplicity 2 at \(x = 2\), a zero at \(x = -1\), passing through \((1, 4)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(f(x) = a(x-2)^2(x+1)\)</p>
+    <p style="text-align: center;">\(f(1) = a(1-2)^2(1+1) = 2a = 4\)</p>
+    <p style="text-align: center;">\(a = 2\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(f(x) = 2(x-2)^2(x+1)\). Sketch it mentally as a Lesson 2-2 audit: degree 3, leading coefficient 2 &mdash; falls left, rises right; crosses at \(-1\), touches at \(2\) from above (the graph is positive on both sides of 2 &mdash; test \(f(1) = 4 &gt; 0\) and \(f(3) = 2(1)(4) = 8 &gt; 0\) &#10003;).</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Sketch \(f(x) = -(x+2)(x-1)^2\) completely, then reconcile the sketch with the FTA's count of zeros.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>End behavior:</em> degree 3, leading coefficient \(-1\): rises left, falls right. <em>Zeros:</em> \(-2\) (multiplicity 1, crosses), \(1\) (multiplicity 2, touches). <em>\(y\)-intercept:</em> \(f(0) = -(2)(1) = -2\).</p>
+    <p><em>Assemble:</em> down from \(+\infty\) on the left, crossing at \(-2\), dipping below the axis through \((0, -2)\), rising to <em>touch</em> the axis at \(1\) from below, then falling away to \(-\infty\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The FTA promises three zeros for degree 3, and the graph delivers all three as intercept events: one at \(-2\), and <em>two</em> at \(1\) &mdash; the touch is a double zero, two roots standing in the same spot. A graph shows fewer than \(n\) intercept <em>locations</em> either because zeros are complex (Example 1) or because they are stacked (here). Reading which is which &mdash; from multiplicities and degree &mdash; is exactly the accounting skill this week's problems drill.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: The Zeros the Axis Never Shows</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), watch a conjugate pair work underground:</p>
+        <ol>
+            <li>Graph Example 1's quartic: <strong>f(x) = x^4 - 10x^3 + 37x^2 - 68x + 40</strong>. Confirm: intercepts at 1 and 5 only &mdash; the pair \(2 \pm 2i\) is invisible.</li>
+            <li>Now graph the pair's quadratic by itself: <strong>g(x) = x^2 - 4x + 8</strong>. It floats entirely above the axis &mdash; its minimum is at \((2, 4)\), never reaching zero. That hovering gap <em>is</em> what a complex pair looks like in real coordinates.</li>
+            <li>Add a slider: type <strong>h(x) = x^2 - 4x + c</strong> and slide \(c\) from 8 down through 4. At \(c = 4\) the parabola kisses the axis &mdash; the complex pair merges into a real double zero at \(x = 2\). Below 4, it splits into two real crossings. One slider, three regimes: complex pair, repeated zero, distinct real pair &mdash; the discriminant \(16 - 4c\) changing sign before your eyes.</li>
+        </ol>
+        <p style="margin-bottom: 0;">This is the honest geometry behind today's algebra: complex zeros are not exotic &mdash; they are what a parabola's roots become when it lifts off the axis, and the double zero is the exact moment of takeoff.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: One zero of \(f(x) = x^3 - 5x^2 + 9x - 5\) is \(2 + i\). Find the other two. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            The conjugate \(2 - i\) is also a zero; the pair builds \((x-2)^2 + 1 = x^2 - 4x + 5\). Dividing: \(x^3 - 5x^2 + 9x - 5 = (x^2 - 4x + 5)(x - 1)\) (check: the quotient must be linear with leading term \(x\) and constant \(-5/5 = -1\); expanding confirms it). The zeros are \(2+i, \; 2-i, \; 1\). Audit: \(f(1) = 1 - 5 + 9 - 5 = 0\) &#10003;.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Build the degree-4 polynomial with zeros \(3i\) and \(-2\) (multiplicity 2) satisfying \(f(1) = 45\), in factored form.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(3i\) brings \(-3i\); the pair builds \(x^2 + 9\). With \((x+2)^2\), multiplicities total \(2 + 2 = 4\) &#10003;. So \(f(x) = a(x^2+9)(x+2)^2\), and \(f(1) = a(10)(9) = 90a = 45\) gives \(a = \frac{1}{2}\). Answer: \(f(x) = \frac{1}{2}(x^2+9)(x+2)^2\).
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Cardano himself met complex numbers first &mdash; in <em>Ars Magna</em> he briefly considered the problem of splitting 10 into two parts whose product is 40, found the answer \(5 \pm \sqrt{-15}\), called the work &ldquo;mental torture,&rdquo; and declared the result &ldquo;as subtle as it is useless.&rdquo; Bombelli's &ldquo;wild thought&rdquo; a generation later was to take such numbers seriously enough to compute with them. It took another 250 years &mdash; until Argand and Gauss gave them a plane to live on &mdash; for the mathematical world to stop apologizing for them. When you reach Unit 9, you will see what Cardano couldn't: they were never useless; they were geometry waiting to be noticed.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>This lesson completed the polynomial half of the unit's ledger. Complex zeros of real polynomials travel in conjugate pairs, working invisibly inside irreducible quadratic factors; repeated zeros stack multiple roots on one intercept; and between those two effects, every &ldquo;missing&rdquo; intercept on a graph is accounted for &mdash; the algebra never loses a zero, it only hides some from the axis. You can now run the machine in both directions: tear a polynomial down to its zeros, or build one to order from a zero list and a point. Tomorrow the machine leaves the workshop: Lesson 2-6 puts polynomials to work as <em>models</em> of real quantities &mdash; and asks the unit's virtue question in its sharpest form yet: when is a polynomial model telling the truth, and when is it merely fitting the data?</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why do complex zeros of real-coefficient polynomials always come in conjugate pairs &mdash; what does the mirror argument actually use?</p>
+    <p>2. How does a real polynomial &ldquo;store&rdquo; a complex pair without showing complex coefficients, and what does that storage look like on the graph?</p>
+    <p>3. When you build a polynomial from a zero list, why is one extra point exactly the right amount of additional information &mdash; no more, no less?</p>
+    <p>4. A degree-\(n\) graph shows fewer than \(n\) intercept locations. What are the two possible explanations, and how do you tell them apart?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">2-5 &middot; Complex and Repeated Zeros; Building Polynomials</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

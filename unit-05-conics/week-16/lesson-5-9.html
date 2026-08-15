@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-9</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-9</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-9</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">The Hyperbola as a Locus</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to derive the standard equation of a hyperbola from its two-focus definition &mdash; a constant <em>difference</em> of distances.</p></li>
+        <li><p>I will be able to write the equation of a hyperbola from its key features: foci, vertices, a point on the curve, or a shifted center.</p></li>
+        <li><p>I will be able to state and use the relation \(c^2 = a^2 + b^2\), and explain precisely why it differs from the ellipse's \(c^2 = a^2 - b^2\).</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Hyperbola</strong>: The set of all points in the plane for which the <em>difference</em> of the distances to two fixed points (the foci) has a constant absolute value. From the Greek <em>hyperbol&#275;</em>, &ldquo;excess, a throwing beyond&rdquo; &mdash; the same root as the rhetorical <em>hyperbole</em>.</p>
+    <p><strong>Foci</strong> (singular <em>focus</em>): The two fixed anchor points of the definition, a distance \(2c\) apart. Same word as the ellipse's &mdash; only the rule that uses them has changed.</p>
+    <p><strong>Transverse axis</strong>: The segment through the foci joining the two <strong>vertices</strong> &mdash; the points of the curve closest to the center. Its length is \(2a\), the constant difference itself.</p>
+    <p><strong>Conjugate axis</strong>: The segment through the center perpendicular to the transverse axis, of length \(2b\). No point of the hyperbola lies on it &mdash; yet it will control the entire shape of tomorrow's graphs.</p>
+    <p><strong>Branch</strong>: One of the hyperbola's two separate arcs. The ellipse's single closed loop has split in two &mdash; and the definition itself tells us why.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Around 200 BC, Apollonius of Perga wrote the <em>Conics</em> &mdash; eight books and nearly four hundred propositions on the curves cut from a cone, a work so complete that for eighteen centuries nobody improved on it. It was Apollonius who gave the three curves their names, drawn from a comparison of areas in his constructions: where the area <em>fell short</em>, he wrote <em>elleipsis</em> (ellipse); where it <em>fit exactly</em>, <em>parabol&#275;</em> (parabola); and where it <em>exceeded</em>, <em>hyperbol&#275;</em> &mdash; the hyperbola, the curve of excess. English still uses his very word: a <em>hyperbole</em> is a statement thrown beyond the truth. Today we meet the last and wildest member of his family.</p>
+    <p>You already own the key. Last week the ellipse was born from two pins and a loop of string: the set of points where the <strong>sum</strong> of the distances to two foci is constant. Now change one word. Keep the two foci &mdash; but demand instead that the <strong>difference</strong> of the two distances stay constant. That single edit tears the closed loop apart. Points closer to the right focus by the required amount form one arc; points closer to the <em>left</em> focus by the same amount form a mirror-image arc on the other side. One definition, two signs, two branches. The absolute value in the definition is not decoration &mdash; it is the reason the curve comes in two pieces.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Definition &mdash; and Its Fine Print</strong></h4>
+        <p>A <strong>hyperbola</strong> is the set of all points \(P\) such that</p>
+        <p style="text-align: center;">\(\left|\, PF_1 - PF_2 \,\right| = 2a,\)</p>
+        <p>where \(F_1\) and \(F_2\) are the foci, a distance \(2c\) apart, and \(0 < 2a < 2c\).</p>
+        <p style="margin-bottom: 0;">The fine print \(2a < 2c\) is not arbitrary &mdash; it is the <strong>triangle inequality</strong> speaking. In triangle \(PF_1F_2\), the difference of two sides can never reach the third side, so \(|PF_1 - PF_2| < F_1F_2 = 2c\) for every point \(P\) off the line through the foci. Ask for a difference <em>equal</em> to \(2c\) and only points on two rays qualify; ask for more and nothing in the plane qualifies at all. Compare the ellipse's fine print, \(2a > 2c\): the string must be longer than the pin gap. Each curve's inequality is the triangle inequality wearing that curve's uniform &mdash; and each one will decide which Pythagorean-flavored relation the curve obeys.</p>
+    </div>
+
+    <p><strong>The derivation.</strong> Place the center at the origin with foci \(F_1(-c, 0)\) and \(F_2(c, 0)\), and let \(P(x, y)\) be any point of the locus. The definition says the difference of the two distances is \(\pm 2a\) &mdash; plus on one branch, minus on the other:</p>
+    <p style="text-align: center;">\(\sqrt{(x+c)^2 + y^2} - \sqrt{(x-c)^2 + y^2} = \pm 2a\)</p>
+    <p>Isolate one radical and square &mdash; the same irreversible move you supervised so carefully with radical equations in Unit 3, used here on purpose and with both signs kept deliberately:</p>
+    <p style="text-align: center;">\((x+c)^2 + y^2 = 4a^2 \pm 4a\sqrt{(x-c)^2 + y^2} + (x-c)^2 + y^2\)</p>
+    <p>Now \((x+c)^2 - (x-c)^2 = 4cx\), so after subtracting and dividing by 4:</p>
+    <p style="text-align: center;">\(cx - a^2 = \pm a\sqrt{(x-c)^2 + y^2}\)</p>
+    <p>Square once more and expand both sides:</p>
+    <p style="text-align: center;">\(c^2x^2 - 2a^2cx + a^4 = a^2x^2 - 2a^2cx + a^2c^2 + a^2y^2\)</p>
+    <p style="text-align: center;">\((c^2 - a^2)\,x^2 - a^2y^2 = a^2(c^2 - a^2)\)</p>
+    <p>Here is the payoff of the fine print: because \(c > a\), the quantity \(c^2 - a^2\) is <em>positive</em>, and we are entitled to name it &mdash; let \(b^2 = c^2 - a^2\). Divide through by \(a^2b^2\):</p>
+    <p style="text-align: center;">\(\dfrac{x^2}{a^2} - \dfrac{y^2}{b^2} = 1\)</p>
+    <p>Two squarings, and no ghosts to hunt: unlike a radical <em>equation</em>, where the reflected twin was an intruder, here the \(\pm\) belonged to the definition from the start &mdash; the two signs <em>are</em> the two branches, and the final equation holds exactly the locus, both arcs together. The minus sign between the terms is the ellipse's plus sign, transformed by the same one-word edit that transformed the definition.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Facts: The Two Standard Forms</strong></h4>
+        <p>With center \((h, k)\), transverse axis length \(2a\), conjugate axis length \(2b\), and \(c^2 = a^2 + b^2\):</p>
+        <ul>
+            <li><strong>Opens left&ndash;right:</strong> \(\dfrac{(x-h)^2}{a^2} - \dfrac{(y-k)^2}{b^2} = 1\) &mdash; vertices \((h \pm a,\, k)\), foci \((h \pm c,\, k)\).</li>
+            <li><strong>Opens up&ndash;down:</strong> \(\dfrac{(y-k)^2}{a^2} - \dfrac{(x-h)^2}{b^2} = 1\) &mdash; vertices \((h,\, k \pm a)\), foci \((h,\, k \pm c)\).</li>
+        </ul>
+        <p style="margin-bottom: 0;"><strong>The positive term steers.</strong> Whichever variable owns the positive term names the direction the branches open, and \(a^2\) is <em>always</em> the denominator of that positive term &mdash; regardless of size. Unlike the ellipse, a hyperbola's \(a\) may be smaller than its \(b\): the roles are assigned by sign, not by seniority. And since \(c^2 = a^2 + b^2\), the foci always sit <em>farther</em> from the center than the vertices &mdash; outside the curve's turning points, where the ellipse tucked its foci inside.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Find the equation of the hyperbola with foci \((\pm 5, 0)\) whose distance-difference is 6 &mdash; then verify the definition at an actual point of the curve.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The foci give \(c = 5\); the constant difference is \(2a = 6\), so \(a = 3\). Then</p>
+    <p style="text-align: center;">\(b^2 = c^2 - a^2 = 25 - 9 = 16\)</p>
+    <p>The foci lie on the \(x\)-axis, so the \(x\)-term is positive: \(\dfrac{x^2}{9} - \dfrac{y^2}{16} = 1\).</p>
+    <p><strong>Now make the equation testify.</strong> Take the point of the curve directly above the right focus, \(x = 5\): then \(\frac{25}{9} - \frac{y^2}{16} = 1\) gives \(y^2 = 16 \cdot \frac{16}{9}\), so \(y = \frac{16}{3}\). Measure both distances from \(P\left(5, \frac{16}{3}\right)\):</p>
+    <p style="text-align: center;">\(PF_1 = \sqrt{(5+5)^2 + \left(\tfrac{16}{3}\right)^2} = \sqrt{\tfrac{900}{9} + \tfrac{256}{9}} = \sqrt{\tfrac{1156}{9}} = \tfrac{34}{3}\)</p>
+    <p style="text-align: center;">\(PF_2 = \tfrac{16}{3}, \qquad PF_1 - PF_2 = \tfrac{34}{3} - \tfrac{16}{3} = \tfrac{18}{3} = 6 \;\checkmark\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{x^2}{9} - \dfrac{y^2}{16} = 1\). The difference came out to exactly \(2a = 6\) &mdash; the equation and the definition are the same statement in two languages.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Write the equation of the hyperbola with vertices \((0, \pm 2)\) and foci \((0, \pm 3)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Vertices and foci on the \(y\)-axis: the branches open up&ndash;down, so \(y\) owns the positive term. From the vertices, \(a = 2\); from the foci, \(c = 3\); so</p>
+    <p style="text-align: center;">\(b^2 = c^2 - a^2 = 9 - 4 = 5\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{y^2}{4} - \dfrac{x^2}{5} = 1\). Note \(a^2 = 4\) is the <em>smaller</em> denominator here &mdash; on a hyperbola that is perfectly legal. The positive term, not the bigger number, wears the \(a^2\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Find the equation of the hyperbola with vertices \((\pm 4, 0)\) that passes through the point \((8, 6)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Vertices on the \(x\)-axis give \(a = 4\) and the form \(\dfrac{x^2}{16} - \dfrac{y^2}{b^2} = 1\). The point \((8, 6)\) must satisfy it:</p>
+    <p style="text-align: center;">\(\dfrac{64}{16} - \dfrac{36}{b^2} = 1 \;\;\Rightarrow\;\; 4 - \dfrac{36}{b^2} = 1 \;\;\Rightarrow\;\; \dfrac{36}{b^2} = 3 \;\;\Rightarrow\;\; b^2 = 12\)</p>
+    <p><strong>Check:</strong> \(\frac{64}{16} - \frac{36}{12} = 4 - 3 = 1\) &#10003;. And the foci: \(c^2 = 16 + 12 = 28\), so \(c = 2\sqrt{7}\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{x^2}{16} - \dfrac{y^2}{12} = 1\), with foci \((\pm 2\sqrt{7},\, 0)\). Exact values &mdash; \(2\sqrt{7}\), not a rounded 5.29.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Write the equation of the hyperbola with foci \((-1, 3)\) and \((7, 3)\) and vertices \((1, 3)\) and \((5, 3)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The center is the midpoint of the foci: \(\left(\frac{-1+7}{2}, 3\right) = (3, 3)\). All four given points share \(y = 3\), so the transverse axis is horizontal. Distances from the center:</p>
+    <p style="text-align: center;">\(c = 7 - 3 = 4, \qquad a = 5 - 3 = 2, \qquad b^2 = c^2 - a^2 = 16 - 4 = 12\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{(x-3)^2}{4} - \dfrac{(y-3)^2}{12} = 1\). The center \((h,k)\) travels exactly as it did for circles, parabolas, and ellipses: every conic in this unit shifts by the same grammar.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Graph the Definition Itself</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), make Desmos draw the locus <em>raw</em> &mdash; no standard form, just the definition:</p>
+        <ol>
+            <li>Type the definition of Example 1 directly: <strong>abs(sqrt((x+5)^2 + y^2) - sqrt((x-5)^2 + y^2)) = 6</strong>. Desmos plots every point whose distance-difference is 6 &mdash; and two branches appear out of pure geometry.</li>
+            <li>Now overlay <strong>x^2/9 - y^2/16 = 1</strong>. The two graphs coincide exactly: the algebra we derived <em>is</em> the locus. Plot the foci <strong>(-5, 0)</strong> and <strong>(5, 0)</strong> and the verified point <strong>(5, 16/3)</strong> to see it sitting on both.</li>
+            <li>Replace the 6 with a slider <strong>k</strong> and drag \(k\) from 0 toward 10. Watch the branches flatten as \(k \to 10 = 2c\) and open wide as \(k \to 0\) &mdash; the triangle inequality's two boundary cases, live. At \(k = 0\), what line do you see, and why must it be the perpendicular bisector of the foci?</li>
+            <li>The calculator confirms; your algebra convinces &mdash; the derivation above is <em>why</em> the two graphs in step 2 cannot disagree.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Find the equation of the hyperbola with foci \((0, \pm 5)\) and distance-difference 8. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Foci on the \(y\)-axis, so the \(y\)-term is positive. \(c = 5\); \(2a = 8\) gives \(a = 4\); \(b^2 = c^2 - a^2 = 25 - 16 = 9\). Equation: \(\dfrac{y^2}{16} - \dfrac{x^2}{9} = 1\). (Check the fine print: \(2a = 8 < 10 = 2c\) &#10003;.)
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Write the equation of the hyperbola with vertices \((\pm 2, 0)\) and foci \((\pm 3, 0)\), and state the constant difference its points obey.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(a = 2\), \(c = 3\), so \(b^2 = 9 - 4 = 5\): \(\dfrac{x^2}{4} - \dfrac{y^2}{5} = 1\). Every point of this curve is exactly \(2a = 4\) units closer to one focus than to the other.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Importing the ellipse's habits. On an ellipse, \(a\) is the <em>larger</em> denominator and \(c^2 = a^2 - b^2\); on a hyperbola, \(a^2\) is the denominator of the <em>positive term</em> &mdash; larger or not &mdash; and \(c^2 = a^2 + b^2\). Write \(c^2 = a^2 - b^2\) here and your foci land <em>inside</em> the vertices, which no hyperbola permits: the foci of a hyperbola always sit beyond the vertices, because each branch bends <em>around</em> its focus. One memory hook: the ellipse <em>subtracts</em> because its foci are trapped inside a bounded curve; the hyperbola <em>adds</em> because its foci must be chased outside the vertices. When in doubt, re-derive: \(b^2\) was <em>defined</em> as \(c^2 - a^2\), which rearranges only one way.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Apollonius earned the title <em>the Great Geometer</em> from antiquity itself, and his <em>Conics</em> set a record for patience: the eighth and final book is lost, and books V&ndash;VII survived only in Arabic translation, recovered by European mathematicians in the seventeenth century &mdash; nearly two thousand years after they were written. When Kepler needed ellipses for planetary orbits and Newton needed conics for gravity, the curves were waiting for them, fully worked out, in a book older than the Roman Empire's peak. Mathematics keeps.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>One word changed &mdash; <em>sum</em> to <em>difference</em> &mdash; and a new curve was born: two branches instead of one loop, foci flung outside the vertices instead of held within, and a new Pythagorean relation \(c^2 = a^2 + b^2\) issued by the triangle inequality's fine print. You derived the equation by squaring twice with both signs kept on purpose, wrote equations from foci, vertices, points, and shifted centers, and made a point of the curve testify that the definition still holds. But one member of today's cast has done no visible work yet: \(b\), the conjugate axis, which touches no point of the curve. Tomorrow it takes the stage &mdash; \(b\) builds the box, the box builds the asymptotes, and the asymptotes tell the truth about where these branches are ultimately headed. If that word <em>asymptote</em> stirs a memory of rational functions and honest long-run statements from Unit 2 &mdash; good. It should.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. The ellipse's definition keeps a sum constant and produces one closed curve; the hyperbola's keeps a difference and produces two separate branches. Where, exactly, in the definition do the two branches come from?</p>
+    <p>2. Why must the constant difference \(2a\) be smaller than the focal distance \(2c\) &mdash; and what happens to the locus at the two boundary cases \(2a = 2c\) and \(2a = 0\)?</p>
+    <p>3. In \(c^2 = a^2 + b^2\), the number \(b\) measures an axis that no point of the hyperbola ever touches. What entitles us to define \(b^2 = c^2 - a^2\) at all, and what part of the fine print guarantees the definition makes sense?</p>
+    <p>4. The derivation squared both sides twice &mdash; the same irreversible operation that manufactured ghost solutions in Unit 3. Why does this derivation end with no ghosts to judge?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-9 &middot; The Hyperbola as a Locus</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-14</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-14</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-14</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Systems of Equations: Linear and Nonlinear</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to solve two-variable linear systems by substitution and by elimination, and verify the solution in every original equation.</p></li>
+        <li><p>I will be able to solve nonlinear systems &mdash; a line meeting a parabola, a line meeting a circle, a curve meeting a curve &mdash; algebraically, judging every candidate pair against both originals.</p></li>
+        <li><p>I will be able to predict how many solutions a system can have from the shapes of its graphs, and solve graphically when exact algebra cannot finish the job.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>System of equations</strong>: Two or more equations considered together, sharing the same variables. The word is honest: the equations form a <em>system</em> &mdash; a set of simultaneous demands.</p>
+    <p><strong>Solution of a system</strong>: An ordered pair \((x, y)\) that satisfies <em>every</em> equation at once. Geometrically: a point lying on every graph &mdash; an intersection. A solution is a point, never a lone number.</p>
+    <p><strong>Substitution</strong>: Solving one equation for a variable and substituting that expression into the other &mdash; collapsing two equations in two unknowns into one equation in one unknown.</p>
+    <p><strong>Elimination</strong>: Adding or subtracting (multiples of) the equations so that a variable cancels. Fastest when the same term appears in both equations &mdash; and that includes nonlinear terms like \(x^2\).</p>
+    <p><strong>Nonlinear system</strong>: A system in which at least one equation graphs as something other than a line. New shapes, new possibilities: curves can meet 0, 1, 2, or more times.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Around 350 BC, long before algebra had symbols, the Greek geometer Menaechmus faced the most famous construction problem of antiquity: <em>double the cube</em> &mdash; build a cube with exactly twice the volume of a given one. That demands a length of \(\sqrt[3]{2}\), which no ruler and compass can produce. Menaechmus's astonishing move: he drew two curves &mdash; in our language, the parabola \(y = x^2\) and the hyperbola \(xy = 2\) &mdash; and observed that <em>where they cross</em>, the impossible number stands: substitute \(y = x^2\) into \(xy = 2\) and you get \(x \cdot x^2 = 2\), so \(x^3 = 2\). The intersection point solves the equation. That is the whole idea of today's lesson, twenty-three centuries old: <strong>to solve simultaneously is to find where curves meet, and to find where curves meet is to solve simultaneously.</strong> When Descartes fused algebra and geometry in 1637, he was industrializing Menaechmus's insight &mdash; and yesterday's lesson, where two functions kept tying, was the setup. Today we pin the ties down exactly.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Solve the linear system, twice &mdash; once by substitution, once by elimination: \(\;2x + 3y = 12\) and \(x - y = 1\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Substitution.</strong> The second equation gives \(x = y + 1\). Substitute into the first:</p>
+    <p style="text-align: center;">\(2(y + 1) + 3y = 12\)</p>
+    <p style="text-align: center;">\(5y + 2 = 12 \;\;\Rightarrow\;\; y = 2, \quad x = y + 1 = 3\)</p>
+    <p><strong>Elimination.</strong> Multiply the second equation by 3 and add, so the \(y\)-terms cancel:</p>
+    <p style="text-align: center;">\(2x + 3y = 12\)</p>
+    <p style="text-align: center;">\(3x - 3y = 3\)</p>
+    <p style="text-align: center;">\(5x \phantom{{}-3y} = 15 \;\;\Rightarrow\;\; x = 3, \quad y = x - 1 = 2\)</p>
+    <p><strong>Verify in both originals</strong> &mdash; always both: \(2(3) + 3(2) = 12\) &#10003; and \(3 - 2 = 1\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((3, 2)\) &mdash; the single point where the two lines cross. Two roads to the same point: substitution is universal; elimination is faster when matching terms line up. Keep both in the kit, because nonlinear systems will demand a choice.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A line meets a parabola: solve \(\;y = x^2 - 2x - 3\) and \(y = x + 1\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Both right-hand sides equal the same \(y\), so set them equal &mdash; substitution in its cleanest form:</p>
+    <p style="text-align: center;">\(x^2 - 2x - 3 = x + 1\)</p>
+    <p style="text-align: center;">\(x^2 - 3x - 4 = 0\)</p>
+    <p style="text-align: center;">\((x - 4)(x + 1) = 0 \;\;\Rightarrow\;\; x = 4 \;\text{ or }\; x = -1\)</p>
+    <p>Each \(x\) needs its partner. Use the <em>simpler</em> equation, the line: \(x = 4 \Rightarrow y = 5\); \(x = -1 \Rightarrow y = 0\).</p>
+    <p><strong>Verify in the parabola:</strong> \(16 - 8 - 3 = 5\) &#10003; and \(1 + 2 - 3 = 0\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((4, 5)\) and \((-1, 0)\). Notice what the algebra became: a quadratic &mdash; so a line can meet a parabola in at most <strong>two</strong> points, and the discriminant of that quadratic counts the meetings before you ever find them: positive means two, zero means tangent (one), negative means the line misses entirely.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>A line meets a circle: solve \(\;x^2 + y^2 = 25\) and \(y = x + 1\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Substitute the line into the circle:</p>
+    <p style="text-align: center;">\(x^2 + (x + 1)^2 = 25\)</p>
+    <p style="text-align: center;">\(x^2 + x^2 + 2x + 1 = 25\)</p>
+    <p style="text-align: center;">\(2x^2 + 2x - 24 = 0 \;\;\Rightarrow\;\; x^2 + x - 12 = 0\)</p>
+    <p style="text-align: center;">\((x + 4)(x - 3) = 0 \;\;\Rightarrow\;\; x = -4 \;\text{ or }\; x = 3\)</p>
+    <p>Partners from the <em>line</em>: \(x = -4 \Rightarrow y = -3\); \(x = 3 \Rightarrow y = 4\).</p>
+    <p><strong>Verify in the circle:</strong> \((-4)^2 + (-3)^2 = 16 + 9 = 25\) &#10003; and \(3^2 + 4^2 = 9 + 16 = 25\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((-4, -3)\) and \((3, 4)\) &mdash; the line is a <em>secant</em>, cutting the circle twice. And a warning hides here: the pair \((3, -4)\) also satisfies the circle (\(9 + 16 = 25\)) but <em>not</em> the line (\(3 + 1 \neq -4\)). The circle, being generous, accepts impostors; only checking <strong>both</strong> equations exposes them. Pair each \(x\) with the \(y\) the line assigns it &mdash; never with every \(y\) the curve would allow.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Curve meets curve, and elimination shines: solve \(\;x^2 + y^2 = 20\) and \(x^2 - y = 8\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Both equations carry the same term \(x^2\) &mdash; so subtract the second from the first and it vanishes:</p>
+    <p style="text-align: center;">\((x^2 + y^2) - (x^2 - y) = 20 - 8\)</p>
+    <p style="text-align: center;">\(y^2 + y = 12 \;\;\Rightarrow\;\; y^2 + y - 12 = 0 \;\;\Rightarrow\;\; (y + 4)(y - 3) = 0\)</p>
+    <p style="text-align: center;">\(y = -4 \;\text{ or }\; y = 3\)</p>
+    <p>Recover \(x\) from \(x^2 = y + 8\), remembering <strong>both</strong> square roots:</p>
+    <p style="text-align: center;">\(y = -4: \;\; x^2 = 4 \;\Rightarrow\; x = \pm 2 \qquad\qquad y = 3: \;\; x^2 = 11 \;\Rightarrow\; x = \pm\sqrt{11}\)</p>
+    <p><strong>Verify (one of each pair shown; check all four yourself):</strong> \((2, -4)\): \(4 + 16 = 20\) &#10003;, \(4 - (-4) = 8\) &#10003;. \((\sqrt{11}, 3)\): \(11 + 9 = 20\) &#10003;, \(11 - 3 = 8\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Four solutions: \((\pm 2, -4)\) and \((\pm\sqrt{11}, 3)\) &mdash; a circle and a parabola embracing at four points. Had a candidate produced \(x^2 = \) a <em>negative</em> number, we would have rejected it: the algebra proposes, the judge disposes. The guard-and-judge discipline from radical week never left; it just changed courtrooms.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Counting Meetings Before Finding Them</strong></h4>
+        <p>The shapes announce the possibilities before the algebra begins &mdash; and the honors habit is to <em>predict the count first</em>, so a wrong answer announces itself:</p>
+        <ul>
+            <li><strong>Line and line:</strong> 0 (parallel), 1 (crossing), or infinitely many (same line).</li>
+            <li><strong>Line and parabola, line and circle:</strong> 0, 1 (tangent), or 2 &mdash; because substitution produces a quadratic, and a quadratic has at most two real roots. The discriminant is the meeting-counter.</li>
+            <li><strong>Circle and parabola:</strong> up to 4 &mdash; substitution produces a quartic in disguise (Example 4's quadratic in \(y\), each root splitting into \(\pm x\)).</li>
+            <li><strong>Increasing curve and decreasing curve:</strong> exactly 1 &mdash; no algebra needed for the <em>count</em>; one rises, one falls, they can cross only once.</li>
+        </ul>
+        <p style="margin-bottom: 0;"><strong>Choosing the tool:</strong> substitution when one equation hands you a variable (a line always does); elimination when the same nonlinear term appears in both equations. Either way, every candidate pair faces both original equations before it may call itself a solution.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Intersections by Click &mdash; and the Equation Algebra Can't Finish</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below):</p>
+        <ol>
+            <li>Type Example 3's system exactly as written: <strong>x^2 + y^2 = 25</strong> on one line, <strong>y = x + 1</strong> on the next. Desmos graphs implicit equations directly &mdash; no solving for \(y\) needed. Click the two gray intersection dots: \((-4, -3)\) and \((3, 4)\), just as your algebra proved.</li>
+            <li>Add Example 4's pair &mdash; <strong>x^2 + y^2 = 20</strong> and <strong>y = x^2 - 8</strong> &mdash; and count four meetings. Click the irrational ones and compare \(\pm 3.317\) against your exact \(\pm\sqrt{11}\).</li>
+            <li>Now the humbling one: solve \(2^x = x + 3\). Type <strong>y = 2^x</strong> and <strong>y = x + 3</strong>. Your exact tools &mdash; factoring, logarithms &mdash; cannot isolate this \(x\); no algebraic form exists. But <em>reasoning</em> still counts the meetings: a line can cut an upward-bending exponential at most twice, and the graphs deliver exactly two: \(x \approx -2.86\) and \(x \approx 2.44\).</li>
+            <li>Note the division of labor. Algebra tells you <em>how many</em> and <em>why</em>; the calculator finds <em>where</em>, to any precision you like &mdash; but only approximately. The calculator confirms; your algebra convinces &mdash; and when algebra cannot finish, it still referees.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve \(y = x^2\) and \(y = 2x + 8\), and verify both solutions in both equations. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Set equal: \(x^2 = 2x + 8 \Rightarrow x^2 - 2x - 8 = 0 \Rightarrow (x-4)(x+2) = 0\), so \(x = 4\) or \(x = -2\). From the line: \(x = 4 \Rightarrow y = 16\); \(x = -2 \Rightarrow y = 4\). Verify in the parabola: \(4^2 = 16\) &#10003;, \((-2)^2 = 4\) &#10003;. Solutions: \((4, 16)\) and \((-2, 4)\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve \(x^2 + y^2 = 10\) and \(y = 3x\). Predict the number of solutions from the shapes before you compute.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Prediction: a line through the origin must pierce a circle centered at the origin exactly twice. Substitute: \(x^2 + 9x^2 = 10 \Rightarrow 10x^2 = 10 \Rightarrow x = \pm 1\). Partners from the line: \((1, 3)\) and \((-1, -3)\). Verify: \(1 + 9 = 10\) &#10003; both times. Two solutions, as the geometry promised.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Two classic system slips, both about <em>partners</em>. First: finding the \(x\)-values and then pairing them with the wrong \(y\)-values &mdash; recover each partner from the <strong>simplest original equation</strong> (usually the line), because the curvier equation happily accepts impostor pairs like \((3, -4)\) in Example 3. Second: solving \(x^2 = 4\) and writing only \(x = 2\) &mdash; the moment a square is unwrapped, <strong>both</strong> roots \(\pm 2\) must appear, or half the intersection points silently vanish from your answer. A system's solution is a complete <em>set of points</em>: every pair present, every pair verified in every equation.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The tool you used today &mdash; treating a curve and an equation as the same object &mdash; entered the world as an <em>appendix</em>. Descartes attached <em>La G&eacute;om&eacute;trie</em> to the back of his 1637 <em>Discourse on Method</em>, almost as a demonstration piece, and in it every equation became a curve and every curve an equation. Every graph you have ever clicked in Desmos runs on that appendix. Menaechmus found the bridge; Descartes paved it; you now commute across it daily without feeling the river underneath.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>A system asks two demands at once, and its solutions are the points loyal to both &mdash; the intersections. You now own the full toolkit: substitution when an equation offers up a variable, elimination when a shared term can be made to vanish, the discriminant to count meetings before finding them, the both-equations check that unmasks impostor pairs, and the graphical method for equations &mdash; like \(2^x = x + 3\) &mdash; that exact algebra honestly cannot finish. The shapes were the story today: lines, parabolas, and circles meeting 0, 1, 2, even 4 ways (and systems will return in earnest when the conic sections arrive in Unit 5). But so far every system has been bare mathematics. Tomorrow the intersections acquire <em>meaning</em>: the point where supply meets demand, where two projectiles pass, where a growing town catches a shrinking one &mdash; the closing lesson of the unit, where every function family you have met since August shows up to the same rendezvous.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why is a solution of a system an ordered pair rather than a number &mdash; and what does that pair mean in the picture?</p>
+    <p>2. Substitution turns &ldquo;where do two curves meet?&rdquo; into an equation in one variable &mdash; a kind you already know how to solve. Why does that collapse work, and what information must you restore afterward?</p>
+    <p>3. How can you know a line meets a circle zero, one, or two times &mdash; from the algebra <em>and</em> from the geometry &mdash; before finding any coordinates?</p>
+    <p>4. For \(2^x = x + 3\), exact algebra fails but the solution count is still provable. What exactly can be known for certain there, what can only be approximated, and which tool certifies which?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-14 &middot; Systems of Equations: Linear and Nonlinear</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

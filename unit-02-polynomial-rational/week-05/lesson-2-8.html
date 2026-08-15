@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 2-8</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 2</div>
+        <div style="font-size: 13px; color: #666;">Polynomial and Rational Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">2-8</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polynomial and Rational Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">2-8</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Graphing Rational Functions</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to determine a rational function's horizontal or slant asymptote by comparing degrees &mdash; and explain why the comparison works.</p></li>
+        <li><p>I will be able to produce a complete graph of a rational function by hand: intercepts, asymptotes, holes, sign chart, and branches, all in order.</p></li>
+        <li><p>I will be able to verify a hand-drawn graph with technology and reconcile any disagreement.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Horizontal asymptote (HA)</strong>: A horizontal line \(y = L\) that the graph approaches as \(x \to \infty\) or \(x \to -\infty\) &mdash; the function's long-run level.</p>
+    <p><strong>Slant (oblique) asymptote</strong>: A slanted line the graph hugs at the far ends, occurring when the numerator's degree exceeds the denominator's by exactly one; found by dividing.</p>
+    <p><strong>Sign chart</strong>: A number line marked at every zero and vertical asymptote, with the function's sign determined on each interval between them.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday answered the vertical question: what a rational function does <em>near its forbidden inputs</em>. Today answers the horizontal one &mdash; what it does in the long run &mdash; and the two answers together let you draw these graphs completely, by hand, with every feature certified. This is the skill your teacher grades closely this week, and it is graded on <em>order</em>: a rational graph is not sketched, it is <em>assembled</em>, feature by feature, each one justified before the curve is drawn.</p>
+    <p>Start with the long-run question. What does \(f(x) = \dfrac{2x^2 - 2x - 4}{x^2 - 9}\) do when \(x\) is enormous? Divide every term, top and bottom, by \(x^2\) &mdash; the highest power in sight:</p>
+    <p style="text-align: center;">\(f(x) = \dfrac{2 - \frac{2}{x} - \frac{4}{x^2}}{1 - \frac{9}{x^2}}\)</p>
+    <p>As \(x\) grows, every fraction with \(x\) downstairs melts toward zero &mdash; that is precisely yesterday's reciprocal behavior, reused &mdash; and the whole expression settles toward \(\frac{2}{1} = 2\). The graph flattens onto the line \(y = 2\): a <strong>horizontal asymptote</strong>. Notice <em>whose</em> 2 and <em>whose</em> 1 survived: the leading coefficients. The lower terms melted precisely because they were lower &mdash; the same leading-term dominance that ran Lesson 2-1, now running the quotient.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Long Run of a Rational Function: Compare the Degrees</strong></h4>
+        <p>For \(f(x) = \frac{p(x)}{q(x)}\) with \(\deg p = n\), \(\deg q = m\):</p>
+        <ul>
+            <li><strong>\(n &lt; m\):</strong> the bottom outgrows the top &mdash; horizontal asymptote \(y = 0\).</li>
+            <li><strong>\(n = m\):</strong> a fair fight, settled by leading coefficients &mdash; horizontal asymptote \(y = \dfrac{a_n}{b_m}\).</li>
+            <li><strong>\(n = m + 1\):</strong> the top wins by one degree &mdash; a <strong>slant asymptote</strong>, found by dividing: \(f(x) = (\text{line}) + \frac{r(x)}{q(x)}\), and the leftover fraction melts to zero at the ends, leaving the line.</li>
+            <li><strong>\(n &gt; m + 1\):</strong> no line contains it &mdash; the ends behave like the polynomial quotient (rare in this course, but the division still tells all).</li>
+        </ul>
+        <p style="margin-bottom: 0;"><strong>The honest reading of an HA:</strong> it is a statement about the <em>ends only</em>. The middle of the graph may cross a horizontal asymptote &mdash; and often does. (A vertical asymptote can never be crossed: the function does not exist there. The two kinds of asymptote carry different licenses; confusing them is this lesson's classic error.)</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>State the long-run behavior of each: &nbsp; &#9312; \(f(x) = \dfrac{3x^2 + 1}{x^2 - 4}\) &emsp; &#9313; \(g(x) = \dfrac{2x}{x^2 + 1}\) &emsp; &#9314; \(h(x) = \dfrac{x^2}{x - 1}\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; Degrees equal (2 = 2): HA at the ratio of leading coefficients, \(y = 3\).</p>
+    <p>&#9313; Top degree 1 &lt; bottom degree 2: HA \(y = 0\). (And note: \(g(0) = 0\) &mdash; the graph passes straight through its own horizontal asymptote at the origin. Legal, because the HA only governs the ends.)</p>
+    <p>&#9314; Top degree 2 = bottom degree 1 + 1: slant asymptote. Divide \(x^2\) by \(x - 1\) synthetically (coefficients \(1, 0, 0\), \(k = 1\)): bottom row \(1, 1, \fbox{1}\) &mdash; quotient \(x + 1\), remainder 1, so</p>
+    <p style="text-align: center;">\(h(x) = x + 1 + \dfrac{1}{x - 1}\)</p>
+    <p>At the far ends the leftover \(\frac{1}{x-1}\) melts away, and the graph hugs the line \(y = x + 1\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> &#9312; HA \(y = 3\) &emsp; &#9313; HA \(y = 0\) &emsp; &#9314; slant asymptote \(y = x + 1\). One diagnostic &mdash; compare the degrees &mdash; three different fates. And see what &#9314;'s division did: last week's synthetic division is this week's graphing tool. Nothing in this unit retires.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Treating a horizontal asymptote as a fence the graph may never touch. That is true of <em>vertical</em> asymptotes &mdash; the function does not exist there &mdash; but an HA is a claim about the far ends only, and the middle of the graph crosses it freely. In Example 2 below, the curve crosses its own HA at \(x = 7\), computed exactly. If your sketch refuses to cross an HA that the algebra says is crossed, the sketch is wrong, not the algebra. When in doubt, <em>solve \(f(x) = L\)</em>: solutions are crossings, and they are ordinary points like any other.</div>
+    </div>
+
+    <p>Now the main event: the complete graph, assembled in disciplined order. This is the procedure to internalize &mdash; it appears on this week's Focus assignment and again on the unit test.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Complete-Graph Procedure</strong></h4>
+        <ol>
+            <li><strong>Factor</strong> numerator and denominator completely; record the domain; mark any holes.</li>
+            <li><strong>Intercepts:</strong> \(x\)-intercepts at the numerator's surviving zeros; \(y\)-intercept at \(f(0)\).</li>
+            <li><strong>Vertical asymptotes:</strong> the denominator's surviving zeros (yesterday's work).</li>
+            <li><strong>Long-run behavior:</strong> compare degrees &mdash; HA or slant line, drawn dashed.</li>
+            <li><strong>Sign chart:</strong> mark every \(x\)-intercept and VA on a number line; test one point per interval. The function cannot change sign anywhere else &mdash; the same fencepost logic as polynomial graphs.</li>
+            <li><strong>Assemble the branches:</strong> in each region, the signs, intercepts, and asymptote approaches admit exactly one reasonable curve. Draw it; check for HA crossings by solving \(f(x) = L\).</li>
+        </ol>
+        <p style="margin-bottom: 0;">Every line of the procedure cites a theorem you own. That is what &ldquo;complete&rdquo; means: not a pretty curve, but a curve where every feature could survive cross-examination.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Produce a complete graph of \(f(x) = \dfrac{2x^2 - 2x - 4}{x^2 - 9}\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>1. Factor:</em> \(f(x) = \dfrac{2(x-2)(x+1)}{(x-3)(x+3)}\). Domain: \(x \neq \pm 3\); nothing cancels, so no holes.</p>
+    <p><em>2. Intercepts:</em> \(x\)-intercepts at \(2\) and \(-1\); \(y\)-intercept \(f(0) = \dfrac{-4}{-9} = \dfrac{4}{9}\).</p>
+    <p><em>3. Vertical asymptotes:</em> \(x = 3\) and \(x = -3\).</p>
+    <p><em>4. Long run:</em> degrees equal, HA \(y = 2\) (the opening computation). Crossing check: solve \(f(x) = 2\):</p>
+    <p style="text-align: center;">\(2x^2 - 2x - 4 = 2(x^2 - 9) = 2x^2 - 18\)</p>
+    <p style="text-align: center;">\(-2x - 4 = -18 \;\;\Rightarrow\;\; x = 7\)</p>
+    <p>The graph crosses its HA once, at \((7, 2)\), then re-approaches the line from below as \(x \to \infty\).</p>
+    <p><em>5. Sign chart:</em> markers at \(-3, -1, 2, 3\) give five intervals; one test point each:</p>
+    <p style="text-align: center;">\(f(-4) = \frac{2(-6)(-3)}{(-7)(-1)} = \frac{36}{7} &gt; 0 \qquad f(-2) = \frac{2(-4)(-1)}{(-5)(1)} = -\frac{8}{5} &lt; 0 \qquad f(0) = \frac{4}{9} &gt; 0\)</p>
+    <p style="text-align: center;">\(f(2.5) = \frac{2(0.5)(3.5)}{(-0.5)(5.5)} &lt; 0 \qquad f(4) = \frac{2(2)(5)}{(1)(7)} = \frac{20}{7} &gt; 0\)</p>
+    <p>Signs, left to right: \(+, \; -, \; +, \; -, \; +\).</p>
+    <p><em>6. Assemble:</em> Left branch: positive, hugging \(y = 2\) from above at the far left, rising to \(+\infty\) at \(x = -3^-\). Middle: falls from \(+\infty\)&hellip; no &mdash; read the signs: on \((-3, -1)\) the function is <em>negative</em>, so the branch climbs from \(-\infty\) at \(x = -3^+\), crosses at \(-1\), arches over the positive stretch through \((0, \frac{4}{9})\), crosses down at \(2\), and plunges to \(-\infty\) at \(x = 3^-\). Right branch: falls from \(+\infty\) at \(x = 3^+\), dips to cross \(y = 2\) at \((7, 2)\), and approaches the HA from below thereafter.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Three branches, every feature computed above. (Notice the honest self-correction in step 6: the first instinct for the middle branch contradicted the sign chart, and <strong>the sign chart wins</strong> &mdash; it is computed evidence, not impression. Checking each branch against the chart before inking it is exactly what the rubric's reasoning criterion looks for.)</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Graph \(g(x) = \dfrac{x^2 - 4x + 5}{x - 2}\), slant asymptote and all.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>Factor / domain:</em> the numerator's discriminant is \(16 - 20 &lt; 0\) &mdash; it does not factor over the reals, so there are <strong>no \(x\)-intercepts</strong>. Domain: \(x \neq 2\); VA \(x = 2\).</p>
+    <p><em>\(y\)-intercept:</em> \(g(0) = \frac{5}{-2} = -\frac{5}{2}\).</p>
+    <p><em>Long run:</em> top degree exceeds bottom by one &mdash; divide synthetically (coefficients \(1, -4, 5\), \(k = 2\)): bottom row \(1, -2, \fbox{1}\), so</p>
+    <p style="text-align: center;">\(g(x) = x - 2 + \dfrac{1}{x - 2}\)</p>
+    <p>Slant asymptote \(y = x - 2\), approached at both far ends; the leftover \(\frac{1}{x-2}\) also hands us the VA behavior for free: positive side up, negative side down.</p>
+    <p><em>Assemble:</em> right of the VA, the graph sits <em>above</em> the slant line (the leftover is positive) &mdash; a branch falling from \(+\infty\), bottoming out, and climbing along the line. Left of the VA it sits <em>below</em> the line, arching down through \((0, -\frac{5}{2})\) from the line toward \(-\infty\). No axis crossings anywhere &mdash; consistent with the missing \(x\)-intercepts.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Two branches straddling the point where VA meets slant line, never touching the axis. The rewritten form \(g(x) = (x-2) + \frac{1}{x-2}\) told the entire story: line plus melting correction &mdash; a rational function is its long-run line <em>plus</em> a reciprocal-shaped disagreement, and the disagreement is exactly what yesterday taught you to read.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: Verifying a Complete Graph</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">15 min</span></h4>
+        <p>This is the year's second designated calculator-craft lesson: verifying a multi-feature hand graph. At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), rebuild Example 2:</p>
+        <ol>
+            <li>Line 1: <strong>f(x) = (2x^2 - 2x - 4)/(x^2 - 9)</strong>.</li>
+            <li>Lines 2&ndash;4: the asymptote frame &mdash; <strong>y = 2</strong>, <strong>x = 3</strong>, <strong>x = -3</strong>. Click each line's icon and make them dashed: claims, not curve.</li>
+            <li>Audit your features one by one: click the intercepts (should be \(-1\), \(2\), and \(y\)-intercept \(0.444\ldots = \frac{4}{9}\)); trace the far ends onto \(y = 2\); confirm the crossing at \((7, 2)\) by clicking the intersection of Line 1 and \(y = 2\).</li>
+            <li>Window discipline from Lesson 2-2 applies doubly here: the default window hides the HA crossing at \(x = 7\) and the left end's approach. Widen to \(x\) from \(-20\) to \(20\) before declaring victory.</li>
+            <li>Then rebuild Example 3 with its slant: graph <strong>g(x) = (x^2 - 4x + 5)/(x - 2)</strong> and <strong>y = x - 2</strong> (dashed). Zoom out and watch the branches close onto the line &mdash; the leftover \(\frac{1}{x-2}\) visibly melting.</li>
+        </ol>
+        <p style="margin-bottom: 0;">The order matters: <strong>hand graph first, machine second.</strong> Used that way, every disagreement is a discovery &mdash; either your algebra slipped or your window lies, and finding out which is where the learning is.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: State the horizontal or slant asymptote of each: &#9312; \(\dfrac{5x^3 - 1}{2x^3 + x}\) &emsp; &#9313; \(\dfrac{x + 7}{x^2 - 1}\) &emsp; &#9314; \(\dfrac{x^2 + x - 6}{x + 4}\). Work them before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            &#9312; Equal degrees: HA \(y = \frac{5}{2}\). &#9313; Top degree lower: HA \(y = 0\). &#9314; Top exceeds by one: divide (coefficients \(1, 1, -6\), \(k = -4\)): bottom row \(1, -3, 6\) &mdash; quotient \(x - 3\), remainder 6, so slant asymptote \(y = x - 3\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Does the graph of \(f(x) = \dfrac{3x^2 + x}{x^2 + 1}\) cross its horizontal asymptote? Find the HA, then settle the crossing exactly.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Equal degrees: HA \(y = 3\). Solve \(f(x) = 3\): \(3x^2 + x = 3x^2 + 3\) gives \(x = 3\). Yes &mdash; one crossing, at \((3, 3)\), after which the graph approaches \(y = 3\) from&hellip; test \(f(10) = \frac{310}{101} \approx 3.07\): from <em>above</em>. The ends obey the asymptote; the crossing was the middle's business.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The rewriting trick behind slant asymptotes &mdash; <em>quotient plus remainder-over-divisor</em> &mdash; is one of the most reused ideas in higher mathematics. In calculus it splits rational functions for integration; in number theory the same maneuver on integers powers the Euclidean algorithm, the 2,300-year-old procedure that still secures modern cryptography. When you wrote \(g(x) = (x-2) + \frac{1}{x-2}\) today, you used the same lever Euclid did &mdash; division with remainder as a way of <em>seeing structure</em>, not just computing.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>A rational function's graph is fully governed: the numerator's zeros place the intercepts, the denominator's zeros raise the vertical asymptotes, the degree comparison sets the long-run line &mdash; horizontal or slant &mdash; and the sign chart locks every branch into its region. Between the sign chart's fenceposts and the asymptotes' approaches, there is essentially one graph the evidence allows, and you can now draw it and defend it feature by feature. The graphs are done; what remains is to <em>solve</em> with these functions. Next week opens with rational equations and inequalities &mdash; where the forbidden inputs you have learned to respect become the source of a famous trap, and an AI will walk straight into it for you.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does dividing every term by the highest power of \(x\) reveal the horizontal asymptote, and which coefficients survive the melt?</p>
+    <p>2. What different licenses do vertical and horizontal asymptotes carry &mdash; which can be crossed, which cannot, and why?</p>
+    <p>3. How does polynomial division convert a top-heavy rational function into &ldquo;line plus melting correction,&rdquo; and what does each piece of that form control?</p>
+    <p>4. In the complete-graph procedure, what theorem or computation certifies each feature &mdash; and why does the sign chart outrank your drawing instincts?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">2-8 &middot; Graphing Rational Functions</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

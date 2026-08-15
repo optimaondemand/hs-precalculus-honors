@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-7</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-7</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-7</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Properties of Logarithms</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to prove the product, quotient, and power rules for logarithms directly from the laws of exponents.</p></li>
+        <li><p>I will be able to expand a logarithm of a product, quotient, or power into a sum of simple logarithms &mdash; and condense such a sum back into a single logarithm.</p></li>
+        <li><p>I will be able to derive and use the change-of-base formula to evaluate a logarithm of any base with any calculator.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Product rule</strong>: \(\log_b(MN) = \log_b M + \log_b N\) &mdash; the logarithm of a product is the <em>sum</em> of the logarithms.</p>
+    <p><strong>Quotient rule</strong>: \(\log_b\!\left(\dfrac{M}{N}\right) = \log_b M - \log_b N\) &mdash; the logarithm of a quotient is the <em>difference</em>.</p>
+    <p><strong>Power rule</strong>: \(\log_b(M^p) = p \log_b M\) &mdash; an exponent inside the logarithm becomes a multiplier outside it.</p>
+    <p><strong>Change-of-base formula</strong>: \(\log_b x = \dfrac{\log_a x}{\log_a b}\) &mdash; any logarithm, rewritten as a ratio of logarithms in a base of your choosing.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>On Monday you learned what Napier invented; today you learn <em>why it worked</em>. The three rules of this lesson are the entire labor-saving engine. To multiply two enormous numbers, an astronomer looked up their logarithms in a table, <strong>added</strong> the two entries &mdash; addition being cheap where multiplication is dear &mdash; and looked up which number owns that logarithm. Multiplication had become a lookup and a sum. Fold the same trick into a pair of sliding rulers marked on logarithmic scales and you get the slide rule, invented within a decade of Napier's book &mdash; and for the next three and a half centuries, that sliding stick <em>was</em> calculation: every bridge, ship, and engine of the industrial age, the Empire State Building, and the machines of the early space program were figured on logarithmic scales. Slide rules were still riding in engineers' pockets during the Apollo missions. All of it rests on three identities you can prove in the next ten minutes &mdash; because each one is an exponent law from Lesson 3-1, wearing its logarithmic grammar.</p>
+    <p>The whole strategy of proof is one move: <em>name the exponents, then let the exponent laws speak.</em> A logarithm is an exponent &mdash; so give the exponents letters and watch each rule fall out.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Prove the product rule: \(\log_b(MN) = \log_b M + \log_b N\) for all positive \(M, N\) and any legal base \(b\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>Name the exponents.</em> Let</p>
+    <p style="text-align: center;">\(m = \log_b M \quad \text{and} \quad n = \log_b N\)</p>
+    <p><em>Translate to exponential grammar</em> &mdash; by Monday's definition, these say exactly:</p>
+    <p style="text-align: center;">\(M = b^m \quad \text{and} \quad N = b^n\)</p>
+    <p><em>Let the exponent law speak.</em> Multiply the two equations; same base, so exponents add:</p>
+    <p style="text-align: center;">\(MN = b^m \cdot b^n = b^{m+n}\)</p>
+    <p><em>Translate back.</em> The statement \(MN = b^{m+n}\) says, in logarithmic grammar: \(m + n\) is the exponent that turns \(b\) into \(MN\). That is,</p>
+    <p style="text-align: center;">\(\log_b(MN) = m + n = \log_b M + \log_b N \quad \blacksquare\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Proved &mdash; and notice what the proof reveals. The product rule is not a new fact about logarithms; it is the old fact \(b^m \cdot b^n = b^{m+n}\), read in the mirror. Logs turn multiplication into addition <em>because exponents already did</em>.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Three Rules &mdash; Each an Exponent Law in the Mirror</strong></h4>
+        <p>For positive \(M, N\), any real \(p\), and legal base \(b\):</p>
+        <ul>
+            <li><strong>Product rule:</strong> \(\log_b(MN) = \log_b M + \log_b N\) &mdash; the mirror of \(b^m b^n = b^{m+n}\).</li>
+            <li><strong>Quotient rule:</strong> \(\log_b\!\left(\dfrac{M}{N}\right) = \log_b M - \log_b N\) &mdash; the mirror of \(\dfrac{b^m}{b^n} = b^{m-n}\).</li>
+            <li><strong>Power rule:</strong> \(\log_b(M^p) = p\log_b M\) &mdash; the mirror of \((b^m)^p = b^{mp}\); run the machinery: \(M^p = (b^m)^p = b^{mp}\), so \(\log_b(M^p) = mp\).</li>
+        </ul>
+        <p style="margin-bottom: 0;">All three proofs use the identical machinery: name the exponents, translate, apply the exponent law, translate back. Example 1 wrote out the first; the power rule is sketched above; the quotient rule is <em>yours</em> &mdash; writing that proof, every step labeled, is Method Problem A on this week's Focus assignment.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Expand completely: \(\log_b\!\left(\dfrac{x^3 y^2}{z^5}\right)\), for positive \(x, y, z\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Work from the outside in, citing each rule as it acts:</p>
+    <p style="text-align: center;">\(\log_b\!\left(\dfrac{x^3 y^2}{z^5}\right) = \log_b(x^3 y^2) - \log_b(z^5)\) &nbsp;&nbsp;<em>(quotient rule)</em></p>
+    <p style="text-align: center;">\(= \log_b(x^3) + \log_b(y^2) - \log_b(z^5)\) &nbsp;&nbsp;<em>(product rule)</em></p>
+    <p style="text-align: center;">\(= 3\log_b x + 2\log_b y - 5\log_b z\) &nbsp;&nbsp;<em>(power rule, three times)</em></p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(3\log_b x + 2\log_b y - 5\log_b z\). One compound logarithm has become an inventory of simple ones &mdash; exactly the form a table-user (or, next lesson, an equation-solver) needs.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Condense to a single logarithm and evaluate exactly: \(2\log_6 4 + \log_6 27 - \log_6 12\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Reverse the expansion process, citing each rule:</p>
+    <p style="text-align: center;">\(2\log_6 4 = \log_6(4^2) = \log_6 16\) &nbsp;&nbsp;<em>(power rule &mdash; coefficients climb inside first)</em></p>
+    <p style="text-align: center;">\(\log_6 16 + \log_6 27 = \log_6(16 \cdot 27) = \log_6 432\) &nbsp;&nbsp;<em>(product rule)</em></p>
+    <p style="text-align: center;">\(\log_6 432 - \log_6 12 = \log_6\!\left(\dfrac{432}{12}\right) = \log_6 36\) &nbsp;&nbsp;<em>(quotient rule)</em></p>
+    <p>Now the exponent question: 6 to what exponent gives 36? Since \(6^2 = 36\),</p>
+    <p style="text-align: center;">\(\log_6 36 = 2\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(2\). Three messy-looking logarithms, none of them individually a nice number, collapse to an integer &mdash; the rules see structure the eye does not.</p>
+
+    <p>One tool remains. Your calculator offers \(\log\) (base 10) and \(\ln\) (base \(e\)) &mdash; but Example 3 lived in base 6. What if a base-6 logarithm <em>doesn't</em> collapse to an integer? Derive the escape hatch. Set \(y = \log_b x\), so \(b^y = x\). Take the logarithm of both sides <em>in any base you like</em> &mdash; say base \(a\) &mdash; and apply the power rule:</p>
+    <p style="text-align: center;">\(\log_a(b^y) = \log_a x \;\; \Rightarrow \;\; y \log_a b = \log_a x \;\; \Rightarrow \;\; y = \dfrac{\log_a x}{\log_a b}\)</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: Change of Base</strong></h4>
+        <p style="text-align: center;">\(\log_b x = \dfrac{\log_a x}{\log_a b} \qquad \text{in particular} \qquad \log_b x = \dfrac{\log x}{\log b} = \dfrac{\ln x}{\ln b}\)</p>
+        <p style="margin-bottom: 0;">Any logarithm in any base is a <em>ratio</em> of logarithms in a base your calculator speaks &mdash; Napier's &ldquo;ratio-number&rdquo; earning its name one more time. Note carefully what this formula is and is not: \(\frac{\log x}{\log b}\) is a quotient <em>of two logarithms</em>, which is not the same creature as the logarithm <em>of a quotient</em>. The Common Mistake box below has more to say about that.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Evaluate \(\log_7 100\) to four decimal places, and verify the answer.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Estimate first: \(7^2 = 49 &lt; 100 &lt; 343 = 7^3\), so the answer lies between 2 and 3, nearer 2. Change to base 10, where \(\log 100 = 2\) exactly:</p>
+    <p style="text-align: center;">\(\log_7 100 = \dfrac{\log 100}{\log 7} = \dfrac{2}{0.8451} \approx 2.3666\)</p>
+    <p>Verify by exponentiating &mdash; the confirm-by-inverting habit from Monday: \(7^{2.3666} \approx 100.0\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\log_7 100 \approx 2.3666\) &mdash; between 2 and 3, nearer 2, exactly as estimated.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE PLAUSIBLE IMPOSTOR</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student asked an AI to simplify \(\log(x + 10) + \log x\). It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;First, distribute the logarithm over the addition: log(x + 10) = log x + log 10 = log x + 1. So the whole expression becomes log x + 1 + log x = <strong>2 log x + 1</strong>. By the power rule this is log(x&sup2;) + 1, so the simplified form is <strong>log(10x&sup2;)</strong>.&rdquo;</p>
+            <p>Every step after the first is genuine &mdash; the power rule is quoted correctly, the final condensation is clean. But the first move is counterfeit: <strong>there is no rule that distributes a logarithm over a sum.</strong> One line of arithmetic convicts it:</p>
+            <p style="text-align: center;">\(\log(10 + 10) = \log 20 \approx 1.301, \qquad \text{but} \qquad \log 10 + \log 10 = 1 + 1 = 2\)</p>
+            <p>Not equal &mdash; the &ldquo;identity&rdquo; fails at the first number you try. The true rule turns <em>products</em> into sums: \(\log(MN) = \log M + \log N\). Nothing turns sums into sums; \(\log(M + N)\) simply does not decompose.</p>
+            <p style="margin-bottom: 0;">Diagnose the slip: the machine pattern-matched the <em>shape</em> of the product rule &mdash; &ldquo;log of two things combined = logs, combined&rdquo; &mdash; onto the wrong operation, then executed flawlessly from the false premise. This is the unit's standing AI lesson: fluent execution, missing discipline. The machine knows what the rules look like; <em>you</em> must know what they are &mdash; which is exactly why today's proofs matter. On this week's Focus set, you will sit as examiner over five claimed identities, real and counterfeit mixed.</p>
+        </div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Expand completely: \(\log\!\left(\dfrac{100\,x^3}{y}\right)\), for positive \(x, y\) &mdash; one term should come out as a plain number.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Quotient rule, then product rule, then power rule: \(\log(100x^3) - \log y = \log 100 + \log(x^3) - \log y = 2 + 3\log x - \log y\). The 100 dissolved into the exact value \(\log 100 = 2\) &mdash; always evaluate the pieces that can be evaluated.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Condense and evaluate exactly: \(2\log 5 + \log 4\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Power rule: \(2\log 5 = \log 25\). Product rule: \(\log 25 + \log 4 = \log 100 = 2\). Two &ldquo;calculator numbers&rdquo; &mdash; \(\log 5\) and \(\log 4\) are both irrational decimals &mdash; combine into a clean integer.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Three illegal moves, each a real rule worn by the wrong expression. <strong>&#9312;</strong> \(\log(x + y) \neq \log x + \log y\) &mdash; the product rule dresses up as a &ldquo;sum rule&rdquo;; the AI Checkpoint's counterexample (\(\log 20\) vs. \(2\)) kills it. <strong>&#9313;</strong> \((\log x)^3 \neq \log(x^3)\) &mdash; the right side is the power rule's \(3\log x\); the left side <em>cubes the output</em>, a different act entirely. Test \(x = 1000\): \((\log 1000)^3 = 27\) but \(\log(1000^3) = 9\). <strong>&#9314;</strong> \(\dfrac{\log a}{\log b} \neq \log\!\left(\dfrac{a}{b}\right)\) &mdash; the left side is a perfectly good number, but its name is <em>change of base</em>: it equals \(\log_b a\), not the log of a quotient. When in doubt, run one numeric test case &mdash; a true identity survives every number you throw at it; a fake rarely survives the first.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">A slide rule is the product rule made of wood: two rulers whose markings are spaced by <em>logarithm</em>, so that sliding one along the other physically <em>adds the logs</em> &mdash; and adding logs, as you proved today, multiplies the numbers. When engineers carried slide rules through the Apollo era, they were carrying Example 1 in their pockets, machined to three significant figures.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Three rules, one proof strategy: name the exponents, translate, let the exponent laws speak, translate back. The product, quotient, and power rules are the exponent laws in logarithmic mirror-writing, and change of base makes every logarithm computable with the two buttons any calculator offers &mdash; always with the exponentiation check standing verification. You also sat as examiner for the first time: a fluent argument fell to a one-line counterexample, and the difference between knowing a rule's <em>shape</em> and knowing the rule was the whole verdict. Tomorrow the rules go to work on the problem they were sharpened for: a variable trapped in an exponent. Growth questions this unit could only estimate &mdash; <em>when</em> does the account double, <em>when</em> does the sample decay to half &mdash; get exact answers at last. This lesson is the heart of this week's Focus set: the quotient-rule proof and a condensation, method problems both, are waiting for your best hand.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. In what sense is each logarithm rule &ldquo;an exponent law in the mirror,&rdquo; and why does the machinery \(M = b^m, N = b^n\) prove all three?</p>
+    <p>2. Why did turning multiplication into addition change the working lives of astronomers and engineers for three and a half centuries?</p>
+    <p>3. How does one numeric counterexample outweigh any amount of fluent, confident derivation &mdash; and what does that teach about auditing an AI's algebra?</p>
+    <p>4. The change-of-base formula writes one logarithm as a ratio of two others. Why is that not the same as the quotient rule, and how do you keep the two straight?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-7 &middot; Properties of Logarithms</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

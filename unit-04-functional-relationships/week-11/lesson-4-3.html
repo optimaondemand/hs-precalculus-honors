@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 4-3</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 4</div>
+        <div style="font-size: 13px; color: #666;">Functional Relationships</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">4-3</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Functional Relationships</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">4-3</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">The Difference Quotient at Work</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to evaluate a simplified difference quotient at given values of \(x\) and \(h\), and verify the result against a direct two-point computation.</p></li>
+        <li><p>I will be able to interpret the difference quotient as the slope of a secant line, and describe what happens to that line as \(h\) shrinks toward zero.</p></li>
+        <li><p>I will be able to find the slope and equation of a tangent line by letting \(h \to 0\) in a simplified difference quotient, and explain why the simplified form survives \(h = 0\) when the raw form does not.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Secant line</strong>: A line through <em>two</em> points of a curve &mdash; from Latin <em>secare</em>, &ldquo;to cut,&rdquo; because it cuts across the graph. Its slope is exactly the difference quotient: the average rate of change between its two points.</p>
+    <p><strong>Tangent line</strong>: The line that <em>touches</em> the curve at a single point and matches its direction there &mdash; from Latin <em>tangere</em>, &ldquo;to touch.&rdquo; Its slope is the curve's <em>instantaneous</em> rate of change at that point.</p>
+    <p><strong>Instantaneous rate of change</strong>: The rate at a single moment &mdash; a falling stone's speedometer reading, not its trip average. The number the secant slopes close in on as \(h \to 0\).</p>
+    <p><strong>Derivative</strong>: The name calculus gives to the instantaneous rate of change &mdash; the value of the simplified difference quotient as \(h \to 0\). Leibniz wrote it \(\frac{dy}{dx}\). Today you compute it in everything but name; next year it gets a course of its own.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Around 1630 &mdash; a generation before Newton or Leibniz &mdash; Pierre de Fermat, a lawyer in Toulouse who did mathematics in the evenings, found tangent lines to curves by a method he called <em>adequality</em>. Strip away the seventeenth-century dress and his method is startlingly familiar: compare the curve at \(x\) and at \(x + E\), divide the difference by \(E\), simplify &mdash; and then let \(E\) vanish. Fermat was running the difference quotient before the calculus had a name, and he never quite explained the last step: how can \(E\) be nonzero long enough to divide by, then zero when convenient? The honest answer took two centuries to build. Today you will run Fermat's method yourself, see exactly where the puzzle lives, and see how the algebra you did yesterday &mdash; simplifying <em>before</em> letting \(h\) shrink &mdash; is precisely what makes the method sound.</p>
+    <p>The geometric picture first. Yesterday's difference quotient \(\frac{f(x+h) - f(x)}{h}\) is the slope of the line through two points of the graph: \((x, f(x))\) and \((x+h, f(x+h))\). A line through two points of a curve is called a <strong>secant line</strong>. Now imagine holding the first point fixed and sliding the second one along the curve toward it &mdash; that is, shrinking \(h\). The secant line pivots. And as \(h\) gets small, the pivoting slows: the secant settles toward one particular line, the <strong>tangent line</strong>, the line that touches the curve at that single point and points the way the curve is heading. The tangent's slope is the curve's speed <em>at an instant</em> &mdash; and the whole drama of today is watching the two-point slope become a one-point slope without ever dividing by zero.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>For \(f(x) = x^2\), the simplified difference quotient is \(2x + h\). Evaluate the secant slopes at \(x = 1\) for \(h = 1,\ 0.5,\ 0.1,\ 0.01\), and describe what the numbers are doing.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(h = 1:\quad 2(1) + 1 = 3 \qquad h = 0.5:\quad 2 + 0.5 = 2.5\)</p>
+    <p style="text-align: center;">\(h = 0.1:\quad 2 + 0.1 = 2.1 \qquad h = 0.01:\quad 2 + 0.01 = 2.01\)</p>
+    <p>Spot-check the first the long way: the secant through \((1, 1)\) and \((2, 4)\) has slope \(\frac{4-1}{1} = 3\). &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The slopes are <strong>3, 2.5, 2.1, 2.01</strong> &mdash; marching straight toward \(2\). And the simplified form says why with perfect clarity: the slope is \(2 + h\), so as \(h\) shrinks, the slope is \(2\) plus a vanishing correction. The tangent line to \(y = x^2\) at \((1,1)\) has slope exactly \(2\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A stone dropped from a cliff falls \(s(t) = 16t^2\) feet in \(t\) seconds. Find its average velocity over \([2, 2+h]\), then its <em>instantaneous</em> velocity at \(t = 2\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Run the four moves on \(s(t) = 16t^2\):</p>
+    <p style="text-align: center;">\(s(t+h) - s(t) = 16(t+h)^2 - 16t^2 = 16t^2 + 32th + 16h^2 - 16t^2 = 32th + 16h^2\)</p>
+    <p style="text-align: center;">\(\dfrac{s(t+h) - s(t)}{h} = 32t + 16h\)</p>
+    <p>At \(t = 2\), the average velocity over \([2, 2+h]\) is \(64 + 16h\) feet per second. Watch it as the time window closes:</p>
+    <p style="text-align: center;">\(h = 1:\ 80 \qquad h = 0.1:\ 65.6 \qquad h = 0.01:\ 64.16 \qquad h = 0.001:\ 64.016\)</p>
+    <p>Check \(h = 0.1\) the long way: \(s(2.1) = 16(4.41) = 70.56\) and \(s(2) = 64\), so \(\frac{70.56 - 64}{0.1} = 65.6\). &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> As \(h \to 0\), the average velocity \(64 + 16h \to \mathbf{64}\) <strong>feet per second</strong> &mdash; the stone's speed at the instant \(t = 2\), the number a speedometer bolted to the stone would read. No stopwatch can measure a zero-second interval, but the algebra can: simplify first, then let the window close. Galileo established that falling bodies obey exactly this square law; the difference quotient is how we ask his law for a speed.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>For \(f(x) = \sqrt{x}\), use the simplified difference quotient \(\dfrac{1}{\sqrt{x+h} + \sqrt{x}}\) (Lesson 4-2, Example 5) to find: &#9312; the slope of the secant through the graph at \(x = 1\) and \(x = 4\); &#9313; the slope of the tangent at \(x = 1\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; The secant from \(x = 1\) to \(x = 4\) has \(x = 1\), \(h = 3\):</p>
+    <p style="text-align: center;">\(\dfrac{1}{\sqrt{1+3} + \sqrt{1}} = \dfrac{1}{2 + 1} = \dfrac{1}{3}\)</p>
+    <p>Directly: through \((1, 1)\) and \((4, 2)\), slope \(= \frac{2-1}{3} = \frac{1}{3}\). &#10003; The secant line: \(y = 1 + \frac{1}{3}(x - 1)\).</p>
+    <p>&#9313; For the tangent at \(x = 1\), let \(h \to 0\) in the simplified form:</p>
+    <p style="text-align: center;">\(\dfrac{1}{\sqrt{1+h} + \sqrt{1}} \longrightarrow \dfrac{1}{\sqrt{1} + \sqrt{1}} = \dfrac{1}{2}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Secant slope \(\frac{1}{3}\); tangent slope \(\frac{1}{2}\). Pause on what just happened in &#9313;: setting \(h = 0\) in the <em>raw</em> quotient \(\frac{\sqrt{1+h} - 1}{h}\) gives \(\frac{0}{0}\) &mdash; unusable. But yesterday's conjugate work cancelled the \(h\) honestly, and the simplified form takes \(h = 0\) with perfect grace. The algebra was not busywork; it was the toll paid in advance for today's crossing.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Find the equation of the tangent line to \(f(x) = x^2 - 4x\) at \(x = 3\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Slope.</strong> Simplify the difference quotient:</p>
+    <p style="text-align: center;">\(f(x+h) - f(x) = (x+h)^2 - 4(x+h) - (x^2 - 4x) = 2xh + h^2 - 4h\)</p>
+    <p style="text-align: center;">\(\dfrac{f(x+h) - f(x)}{h} = 2x + h - 4\)</p>
+    <p>At \(x = 3\), the secant slopes are \(2(3) + h - 4 = 2 + h\); as \(h \to 0\), the tangent slope is \(m = 2\).</p>
+    <p><strong>Point.</strong> \(f(3) = 9 - 12 = -3\), so the tangent touches at \((3, -3)\).</p>
+    <p><strong>Line.</strong> Point-slope form:</p>
+    <p style="text-align: center;">\(y = -3 + 2(x - 3) = 2x - 9\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(y = 2x - 9\). This is the complete pipeline &mdash; difference quotient, simplify, evaluate, shrink \(h\), point-slope &mdash; and it is, move for move, what the first weeks of a calculus course ask for. Graph both curve and line and the line kisses the parabola at exactly \((3, -3)\), matching its direction there.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>From Secant to Tangent: Why 0/0 Is a Fog, Not a Wall</strong></h4>
+        <p>A secant needs two points; a tangent has one. Setting \(h = 0\) in the raw difference quotient gives \(\frac{f(x) - f(x)}{0} = \frac{0}{0}\) &mdash; and \(\frac{0}{0}\) is not a number. It is a <strong>fog</strong>: a form that hides what is actually happening. The escape is the order of operations you practiced yesterday:</p>
+        <ul>
+            <li><strong>While \(h \neq 0\), simplify.</strong> Every cancellation of \(h\) is legal because \(h\) is a genuine nonzero number during the algebra. The simplified form (\(2x + h - 4\), \(64 + 16h\), \(\frac{1}{\sqrt{x+h}+\sqrt{x}}\)) is <em>equal</em> to the raw quotient at every \(h \neq 0\).</li>
+            <li><strong>Then let \(h \to 0\).</strong> The simplified form no longer divides by \(h\), so it accepts \(h = 0\) gracefully &mdash; and the value it returns is the number the secant slopes were closing in on all along.</li>
+        </ul>
+        <p style="margin-bottom: 0;">That closing-in number is called a <strong>limit</strong>, and the limit of the difference quotient has a name of its own: the <strong>derivative</strong>, the beating heart of differential calculus. Leibniz wrote it \(\frac{dy}{dx}\) &mdash; his \(d\)s are the ghosts of your \(\Delta\)s, shrunk beyond any finite size. This is the doorstep on which this whole week stands: you now compute derivatives in everything but name. The course that names them is one year away, and you will walk in already fluent in its opening move.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Watch the Secant Become the Tangent</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>This is the flagship picture of the week. At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), build a secant line with a shrinkable \(h\):</p>
+        <ol>
+            <li>Define <strong>f(x) = x^2 - 4x</strong>.</li>
+            <li>Add sliders: type <strong>a = 3</strong> and <strong>h = 2</strong>, clicking &ldquo;add slider&rdquo; for each. Set the \(h\) slider's range to \(0.001 \leq h \leq 2\).</li>
+            <li>Pin the two secant points: <strong>(a, f(a))</strong> and <strong>(a + h, f(a + h))</strong>.</li>
+            <li>Draw the secant through them: <strong>y = f(a) + ((f(a + h) - f(a))/h)(x - a)</strong> &mdash; the line whose slope is literally the difference quotient.</li>
+            <li>Now drag \(h\) slowly from 2 down toward 0.001. Watch the second point slide along the parabola into the first, and the secant pivot and settle. It is aiming at a definite resting place.</li>
+            <li>Name the resting place: graph <strong>y = -3 + 2(x - 3)</strong>, Example 4's tangent line. As \(h \to 0\), your secant lies down exactly on it. Drag \(a\) elsewhere and watch the whole show recompute at a new point.</li>
+        </ol>
+        <p>The calculator confirms; your algebra convinces: the picture shows the secant settling, but only the simplified form \(2x + h - 4\) proves <em>where</em> it must settle, and why.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: For \(f(x) = x^2\) (difference quotient \(2x + h\)), find the tangent slope at \(x = -2\), and the secant slope from \(x = -2\) to \(x = 0\). Explain the sign of each.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Tangent at \(x = -2\): let \(h \to 0\) in \(2(-2) + h\), giving slope \(-4\) &mdash; the parabola is falling steeply there, so the sign is negative. Secant from \(-2\) to \(0\) has \(h = 2\): slope \(2(-2) + 2 = -2\); directly, through \((-2, 4)\) and \((0, 0)\): \(\frac{0 - 4}{2} = -2\) &#10003;. The secant averages the steep fall at \(-2\) with the flattening near the vertex, so it is negative but gentler than the tangent.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Using \(f(x) = \dfrac{1}{x}\) and its simplified difference quotient \(\dfrac{-1}{x(x+h)}\), find the secant slope from \(x = 2\) to \(x = 2.5\), then the tangent slope at \(x = 2\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Secant (\(x = 2\), \(h = 0.5\)): \(\dfrac{-1}{2(2.5)} = -\dfrac{1}{5} = -0.2\). Check directly: \(\frac{1/2.5 - 1/2}{0.5} = \frac{0.4 - 0.5}{0.5} = -0.2\) &#10003;. Tangent at \(x = 2\): let \(h \to 0\): \(\dfrac{-1}{2 \cdot 2} = -\dfrac{1}{4}\). The curve falls everywhere it is defined, and both slopes say so.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Setting \(h = 0\) in the <strong>raw</strong> difference quotient, getting \(\frac{0}{0}\), and concluding &ldquo;undefined &mdash; the tangent doesn't exist.&rdquo; The conclusion does not follow: \(\frac{0}{0}\) is not an answer but a signal that <strong>the algebra is not finished</strong>. Simplify first &mdash; expand, subtract, cancel the \(h\) &mdash; and the fog lifts: the simplified form accepts \(h = 0\) and hands you the tangent slope. Order matters absolutely here: <em>cancel while \(h \neq 0\), evaluate after.</em> Reverse the order and you divide by zero; respect it and you walk Fermat's path on solid ground.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The vanishing \(h\) drew one of history's great heckles. In 1734, the philosopher Bishop George Berkeley published <em>The Analyst</em>, mocking the calculus's shrinking increments as &ldquo;the ghosts of departed quantities&rdquo; &mdash; neither something nor nothing, used as nonzero when dividing and as zero when convenient. He had a point: Newton and Leibniz's results were right, but their foundations wobbled exactly where Fermat's had. The rigorous answer &mdash; the modern theory of limits &mdash; was built by Cauchy and Weierstrass in the nineteenth century, more than a hundred years later. Unit 3 taught you to convict ghost <em>solutions</em>; calculus spent a century learning to acquit its ghost <em>quantities</em>. Useful mathematics can outrun its own foundations &mdash; and honest mathematicians eventually circle back and pay the debt.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Today the difference quotient went to work. Evaluated at a point pair, it is a secant slope &mdash; an average rate of change, a line that cuts the curve twice. Simplified and then squeezed, it becomes something the average could never be: the slope of the tangent, the rate at a single instant, a falling stone's true speed at \(t = 2\). The order of operations carried everything &mdash; simplify while \(h \neq 0\), evaluate after &mdash; and that discipline is what turns Fermat's suspicious vanishing \(E\) into sound method. You now know the object's name: the derivative, \(\frac{dy}{dx}\), the opening theme of the calculus, one year ahead and already under your hands. Tomorrow the unit turns from a function's relationship with itself to functions' relationships <em>with each other</em>: two functions can be added, subtracted, multiplied, and divided like numbers &mdash; but their domains must be consulted first, and every combination succeeds only on common ground. The algebra of functions is a study in mathematical courtesy, and it begins with no calculator at all: just pencil, paper, and the four operations you have known since childhood, aimed at a new kind of object.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What distinguishes a secant line from a tangent line, and what precisely happens to the secant as \(h\) shrinks toward zero?</p>
+    <p>2. Why is \(\frac{0}{0}\) a fog rather than an answer &mdash; and how does simplifying the difference quotient <em>before</em> letting \(h \to 0\) lift it?</p>
+    <p>3. In the falling-stone example, what is the physical difference between the average velocity on \([2, 3]\) and the instantaneous velocity at \(t = 2\) &mdash; and which one can no stopwatch measure directly?</p>
+    <p>4. Berkeley called vanishing increments &ldquo;ghosts of departed quantities.&rdquo; What was his objection, in your own words &mdash; and how does the simplify-first discipline answer it for the functions you handled today?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">4-3 &middot; The Difference Quotient at Work</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

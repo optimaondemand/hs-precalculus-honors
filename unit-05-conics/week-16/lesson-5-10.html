@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-10</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-10</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-10</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Graphing Hyperbolas</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to graph any hyperbola in standard form by the box-and-asymptotes method: center, central box, asymptotes, vertices, branches.</p></li>
+        <li><p>I will be able to identify vertices, co-vertices, foci, and branches from either standard form, in either orientation, centered anywhere.</p></li>
+        <li><p>I will be able to explain why the asymptotes are honest long-run statements about the branches &mdash; and prove the branches never touch them.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Asymptote</strong>: A line a curve approaches without bound but never reaches &mdash; from the Greek <em>asympt&#333;tos</em>, &ldquo;not falling together.&rdquo; You met asymptotes in Unit 2 as the honest long-run statements of rational functions; a hyperbola has two, and they cross at its center.</p>
+    <p><strong>Central box</strong> (fundamental rectangle): The rectangle centered at the hyperbola's center, \(2a\) wide along the transverse axis and \(2b\) along the conjugate axis. The hyperbola never touches it &mdash; but its extended diagonals are exactly the asymptotes.</p>
+    <p><strong>Co-vertices</strong>: The endpoints of the conjugate axis, a distance \(b\) from the center. Not points of the hyperbola &mdash; they are scaffolding, and scaffolding is what makes an accurate graph possible.</p>
+    <p><strong>Orientation</strong>: Which way the branches open &mdash; left&ndash;right when the \(x\)-term is positive, up&ndash;down when the \(y\)-term is positive. The positive term steers; the denominators never decide.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>When Apollonius of Perga organized his <em>Conics</em>, he gave the hyperbola's strangest feature an entire book: Book II is largely devoted to the asymptotes &mdash; the two lines that a hyperbola approaches forever and touches never. He proved, with nothing but Greek geometry, what we will prove today with a single rationalization: the gap between branch and line shrinks below any size you name, yet never closes. The very word is his era's: <em>asympt&#333;tos</em>, &ldquo;not falling together.&rdquo; Two thousand years later, you spent Unit 2 learning to read asymptotes as a rational function's honest testimony about its long-run behavior. Today the same honesty returns wearing geometry: a hyperbola's asymptotes are the truth about where its branches are headed.</p>
+    <p>Yesterday's mystery guest goes to work immediately. The number \(b\) touches no point of the curve &mdash; but mark the co-vertices at distance \(b\) from the center, draw the <strong>central box</strong> through vertices and co-vertices, and extend its diagonals: those diagonals are the asymptotes, and the branches thread the box's open ends, hugging the diagonals ever more closely. For \(\frac{x^2}{a^2} - \frac{y^2}{b^2} = 1\), the diagonals of the box run through the origin with slope \(\pm\frac{b}{a}\) &mdash; rise \(b\), run \(a\), straight off the box's corners:</p>
+    <p style="text-align: center;">\(y = \pm \dfrac{b}{a}x \qquad\) (centered form; shift to \(\;y - k = \pm \dfrac{b}{a}(x - h)\;\) for center \((h,k)\))</p>
+    <p>For the vertical form \(\frac{(y-k)^2}{a^2} - \frac{(x-h)^2}{b^2} = 1\), the slopes are \(\pm\frac{a}{b}\). Do not memorize which letter goes on top &mdash; <strong>read the slope off the box</strong>: the diagonal always rises by the half-height and runs by the half-width of the rectangle you just drew. The box cannot lie.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Why the Asymptotes Tell the Truth &mdash; a Proof, Not a Promise</strong></h4>
+        <p>Solve \(\frac{x^2}{a^2} - \frac{y^2}{b^2} = 1\) for \(y\) on the upper-right quarter: \(y = \frac{b}{a}\sqrt{x^2 - a^2}\). Compare it with the asymptote \(y = \frac{b}{a}x\). The gap between them is</p>
+        <p style="text-align: center;">\(\dfrac{b}{a}\left(x - \sqrt{x^2 - a^2}\right) = \dfrac{b}{a} \cdot \dfrac{\left(x - \sqrt{x^2 - a^2}\right)\left(x + \sqrt{x^2 - a^2}\right)}{x + \sqrt{x^2 - a^2}} = \dfrac{ab}{x + \sqrt{x^2 - a^2}}\)</p>
+        <p>Read that final fraction like a Unit 2 mathematician: the numerator \(ab\) is a fixed positive number, and the denominator grows without bound as \(x\) does. So the gap is <strong>always positive</strong> &mdash; the branch runs strictly below the line, never touching &mdash; and <strong>shrinks toward zero</strong> &mdash; the line is exactly where the branch is headed. Both halves of the asymptote's testimony, proved in one rationalization.</p>
+        <p style="margin-bottom: 0;">This is the same virtue asymptotes practiced in Unit 2, arriving by a different road: a rational function's asymptote came from a denominator's long-run dominance; the hyperbola's comes from a difference of squares flattening at long range. Different mechanism &mdash; <strong>same honesty: the asymptote is the graph's own true statement about its far behavior.</strong> A hyperbola drawn without its asymptotes is a witness who hasn't been sworn in.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Facts: The Five-Step Graphing Discipline</strong></h4>
+        <ol>
+            <li><strong>Center.</strong> Plot \((h, k)\).</li>
+            <li><strong>Box.</strong> Mark \(\pm a\) along the transverse direction (the positive term's variable) and \(\pm b\) along the other; draw the rectangle lightly &mdash; it is scaffolding, so dash it.</li>
+            <li><strong>Asymptotes.</strong> Extend both diagonals of the box well past its corners.</li>
+            <li><strong>Vertices.</strong> Darken the two box-edge midpoints on the transverse axis &mdash; the only points where curve and box meet the same line.</li>
+            <li><strong>Branches.</strong> From each vertex, sweep outward, bending toward the asymptotes without crossing them.</li>
+        </ol>
+        <p style="margin-bottom: 0;"><strong>Bonus &mdash; the foci for free:</strong> the corner of the box sits at distance \(\sqrt{a^2 + b^2} = c\) from the center. Put your compass point at the center, pencil on a box corner, and swing an arc to the transverse axis: it lands exactly on a focus. The relation \(c^2 = a^2 + b^2\) is not just algebra &mdash; it is the box's own diagonal, measured.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Graph \(\dfrac{x^2}{25} - \dfrac{y^2}{9} = 1\), giving vertices, foci, and asymptotes.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The \(x\)-term is positive: branches open left&ndash;right, center \((0,0)\), \(a = 5\), \(b = 3\).</p>
+    <p style="text-align: center;">\(c^2 = a^2 + b^2 = 25 + 9 = 34, \qquad c = \sqrt{34}\)</p>
+    <p>Box from \(x = \pm 5\), \(y = \pm 3\); diagonals give asymptotes \(y = \pm\frac{3}{5}x\); vertices \((\pm 5, 0)\); foci \((\pm\sqrt{34}, 0) \approx (\pm 5.83, 0)\) &mdash; just beyond the vertices, as they must be. Sweep the branches from the vertices toward the diagonals.</p>
+    <p><strong>Watch the honesty at work:</strong> at \(x = 50\), the branch is at \(y = \frac{3}{5}\sqrt{2500 - 25} = \frac{3}{5}\sqrt{2475} \approx 29.85\), while the asymptote is at \(y = 30\). Ten box-widths out and the gap is already down to about \(0.15\) &mdash; and by the proof above it equals \(\frac{ab}{x + \sqrt{x^2 - a^2}} = \frac{15}{50 + \sqrt{2475}} \approx 0.15\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Vertices \((\pm 5, 0)\); foci \((\pm\sqrt{34}, 0)\); asymptotes \(y = \pm\frac{3}{5}x\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Graph \(\dfrac{y^2}{16} - \dfrac{x^2}{20} = 1\), giving vertices, foci, and asymptotes.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The \(y\)-term is positive: branches open up&ndash;down. Here \(a^2 = 16\) rides the positive term even though \(20 > 16\) &mdash; sign assigns the roles, not size. So \(a = 4\), \(b = 2\sqrt{5}\), and</p>
+    <p style="text-align: center;">\(c^2 = 16 + 20 = 36, \qquad c = 6\)</p>
+    <p>Vertices \((0, \pm 4)\); foci \((0, \pm 6)\); box half-width \(2\sqrt{5} \approx 4.47\), half-height 4. The asymptote slope is rise over run off the box: \(\pm\dfrac{4}{2\sqrt{5}} = \pm\dfrac{2}{\sqrt{5}} = \pm\dfrac{2\sqrt{5}}{5}\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Vertices \((0, \pm 4)\); foci \((0, \pm 6)\); asymptotes \(y = \pm\frac{2\sqrt{5}}{5}x\). An irrational box builds a perfectly good graph &mdash; exact values first, decimals only to place your pencil.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Graph \(\dfrac{(x+2)^2}{9} - \dfrac{(y-1)^2}{16} = 1\), giving center, vertices, foci, and asymptotes.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Center \((-2, 1)\); \(x\)-term positive, so left&ndash;right; \(a = 3\), \(b = 4\),</p>
+    <p style="text-align: center;">\(c^2 = 9 + 16 = 25, \qquad c = 5\)</p>
+    <p>March from the center: vertices \((-2 \pm 3,\, 1) = (-5, 1)\) and \((1, 1)\); foci \((-2 \pm 5,\, 1) = (-7, 1)\) and \((3, 1)\). The box runs 3 left-right and 4 up-down from the center, so the diagonals climb \(\pm\frac{4}{3}\):</p>
+    <p style="text-align: center;">\(y - 1 = \pm\dfrac{4}{3}(x + 2)\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Center \((-2,1)\); vertices \((-5,1)\), \((1,1)\); foci \((-7,1)\), \((3,1)\); asymptotes \(y - 1 = \pm\frac{4}{3}(x+2)\). A 3&ndash;4&ndash;5 triangle hides in the box's corner &mdash; the compass swing from corner to focus is exactly 5.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A hyperbola has asymptotes \(y = \pm 2x\) and vertices \((0, \pm 6)\). Find its equation and foci.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Vertices on the \(y\)-axis: vertical orientation, \(a = 6\), and the asymptote slope for a vertical hyperbola is \(\pm\frac{a}{b}\) &mdash; the box's rise is now \(a\). So</p>
+    <p style="text-align: center;">\(\dfrac{a}{b} = 2 \;\;\Rightarrow\;\; \dfrac{6}{b} = 2 \;\;\Rightarrow\;\; b = 3, \qquad c^2 = 36 + 9 = 45, \;\; c = 3\sqrt{5}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{y^2}{36} - \dfrac{x^2}{9} = 1\), foci \((0, \pm 3\sqrt{5})\). Reading the graph backward is the same discipline run in reverse: the asymptotes hand you the box, and the box hands you the equation.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Swear In the Witness</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), rebuild Example 3 the way you would on paper:</p>
+        <ol>
+            <li>Graph <strong>(x+2)^2/9 - (y-1)^2/16 = 1</strong>, then add its asymptotes <strong>y - 1 = (4/3)(x+2)</strong> and <strong>y - 1 = -(4/3)(x+2)</strong> as dashed lines (click the line's icon to restyle it &mdash; scaffolding should look like scaffolding).</li>
+            <li>Zoom out, twice, three times. Watch curve and lines fuse into a single X on the screen. That fusion is the asymptote's testimony rendered in pixels &mdash; at long range, the hyperbola <em>is</em> its asymptotes, to within any tolerance your zoom can display.</li>
+            <li>Now zoom far in on one branch where it runs near a diagonal: a sliver of daylight always remains. The proof in the blue box is why that sliver can never close &mdash; the gap equals \(ab/\big(x + \sqrt{x^2 - a^2}\,\big)\), positive for every \(x\).</li>
+            <li>Add sliders: graph <strong>x^2/a^2 - y^2/b^2 = 1</strong> with sliders for \(a\) and \(b\), plus <strong>y = (b/a)x</strong> and <strong>y = -(b/a)x</strong>. Drag \(b\): the box grows taller, the asymptotes steepen, the branches open wider &mdash; the invisible axis is running the whole show. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Graph \(\dfrac{x^2}{9} - \dfrac{y^2}{16} = 1\) &mdash; box, asymptotes, vertices, foci &mdash; before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Left&ndash;right; \(a = 3\), \(b = 4\), \(c^2 = 9 + 16 = 25\), so \(c = 5\). Vertices \((\pm 3, 0)\); foci \((\pm 5, 0)\); box corners \((\pm 3, \pm 4)\); asymptotes \(y = \pm\frac{4}{3}x\). (Compare Example 3: same box, same 3&ndash;4&ndash;5 triangle, center moved home to the origin.)
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Rewrite \(4(y-1)^2 - 25(x+2)^2 = 100\) in standard form, then give center, vertices, and asymptotes.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Divide by 100: \(\dfrac{(y-1)^2}{25} - \dfrac{(x+2)^2}{4} = 1\). Vertical; center \((-2, 1)\); \(a = 5\), \(b = 2\), \(c^2 = 29\). Vertices \((-2, 6)\) and \((-2, -4)\); foci \((-2,\, 1 \pm \sqrt{29})\); asymptotes \(y - 1 = \pm\frac{5}{2}(x+2)\) &mdash; rise 5, run 2, straight off the box.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Reciting &ldquo;the asymptote slope is \(b/a\)&rdquo; as a spell. It is \(\pm\frac{b}{a}\) only for the horizontal form; for the vertical form it is \(\pm\frac{a}{b}\), and a memorized fraction applied to the wrong orientation draws asymptotes the curve will visibly disobey. The cure is never memory but the box: <strong>slope = box half-height over box half-width</strong>, read directly from the rectangle you drew. A second habit to refuse: sketching branches that curl back and touch the asymptote to &ldquo;finish&rdquo; the drawing. The gap \(ab/\big(x+\sqrt{x^2-a^2}\,\big)\) is positive at every \(x\) &mdash; a branch that touches its asymptote is not artistic license; it is a false statement about long-run behavior.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Apollonius proved the asymptote property as pure geometry &mdash; no coordinates, no algebra, no square-root symbol, none of which existed yet. His Book II shows that if you draw a line through a hyperbola parallel to an asymptote, it cuts the curve exactly once; the asymptote itself cuts it exactly never. Eighteen centuries later, Descartes' coordinates turned that geometry into the one-line rationalization you saw today. Same theorem, two civilizations of proof.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The hyperbola now graphs like a discipline rather than a guess: center, box, asymptotes, vertices, branches &mdash; five steps, with the foci thrown in free by the box corner's compass swing, since \(c\) is nothing but the box's own half-diagonal. The asymptotes turned out to be Unit 2's old virtue in new clothing: honest long-run statements, this time proved outright &mdash; the gap \(ab/\big(x + \sqrt{x^2 - a^2}\,\big)\) is forever positive and forever shrinking, so the branches chase their lines eternally and reach them never. So far, though, the hyperbola has been a resident of the mathematics classroom. Tomorrow it goes to work. A ship at sea hears two radio pulses a split second apart and knows &mdash; from that time <em>difference</em> alone &mdash; that it floats somewhere on one branch of a hyperbola. A 500-foot cooling tower stands against the wind because its silhouette is two hyperbolic arcs. The curve of excess turns out to be a servant &mdash; and the constant difference you derived yesterday is exactly what the navigator measures.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. The asymptotes belong to no point of the hyperbola, yet no honest graph can be drawn without them. What, precisely, do they tell the truth about &mdash; and how does the rationalization proof establish both halves of their testimony?</p>
+    <p>2. The central box is built from \(a\) and \(b\), and \(b\) measures an axis the curve never touches. How does this invisible scaffolding end up dictating the vertices, the asymptotes, <em>and</em> the foci?</p>
+    <p>3. Unit 2's asymptotes came from denominators dominating at long range; the hyperbola's come from \(\sqrt{x^2 - a^2}\) flattening toward \(x\). What do the two mechanisms share that makes &ldquo;honest long-run statement&rdquo; the right name for both?</p>
+    <p>4. Given only a hyperbola's two asymptotes and one vertex, can you always reconstruct the entire curve &mdash; equation, foci, and all? What does each given piece contribute?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-10 &middot; Graphing Hyperbolas</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

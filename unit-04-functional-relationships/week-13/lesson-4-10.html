@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 4-10</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 4</div>
+        <div style="font-size: 13px; color: #666;">Functional Relationships</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">4-10</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Functional Relationships</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">4-10</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Restricting the Domain</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to explain, with a witness pair of inputs, exactly why a given function fails the horizontal line test and therefore has no inverse on its full domain.</p></li>
+        <li><p>I will be able to produce an invertible function from a non-invertible one by restricting its domain to a single branch, and find the inverse of the restricted function &mdash; resolving the \(\pm\) fork correctly.</p></li>
+        <li><p>I will be able to state the domain and range of both the restricted function and its inverse, and say why the inverse's domain is forced to equal the original's range.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Restricted domain</strong>: A deliberately narrowed input set &mdash; the same rule, allowed to speak only over part of its natural territory, chosen so that the function becomes one-to-one there.</p>
+    <p><strong>Branch</strong>: One of the one-to-one pieces a folded graph breaks into. A parabola has two branches, one on each side of its vertex; restricting the domain is choosing a branch.</p>
+    <p><strong>Principal branch</strong>: The branch that convention selects when several would do &mdash; the community's standing agreement about which piece the inverse will answer from, so that everyone's inverse means the same thing.</p>
+    <p><strong>Horizontal line test</strong> <em>(review from 4-8)</em>: A function is one-to-one exactly when no horizontal line meets its graph more than once. Every failure of the test is a repeated output &mdash; and a spot where the reverse question has two answers.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday's machinery had a prerequisite stamped on it: <em>one-to-one only</em>. Reflect the parabola \(y = x^2\) across the identity line and you will see why. The reflection is a sideways parabola &mdash; a curve that flunks the vertical line test, assigning the input 9 both the outputs 3 and \(-3\). It is not a function, so it cannot be anyone's inverse. The obstruction was visible before reflecting: \(f(3) = f(-3) = 9\), a horizontal-line-test failure, a repeated output. Ask the parabola &ldquo;which input produced 9?&rdquo; and it gives two honest, incompatible answers.</p>
+    <p>Mathematics has faced this politely for centuries, and its answer is today's move: if the whole function cannot take questions in reverse, <strong>narrow the question until it can</strong>. We do not change the rule, and we do not discard the function &mdash; we restrict its domain, keeping only a stretch of inputs on which every output appears once. On that domain of honesty, the inverse exists, and yesterday's machinery runs without modification. The move looks small. It is one of the most consequential conventions in the course: hold onto it, because next spring it will single-handedly create three functions you have not met yet.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Show that \(f(x) = x^2\) has no inverse on its full domain; then restrict the domain to make it one-to-one, and find the inverse of the restricted function &mdash; both ways.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>The failure, witnessed:</strong> \(f(-3) = 9 = f(3)\). One output, two owners; the horizontal line \(y = 9\) crosses the graph twice; the reverse question is ambiguous. No inverse exists on \((-\infty, \infty)\).</p>
+    <p><strong>The repair:</strong> the graph folds at the vertex \((0,0)\), so cut there. Restrict to \(x \geq 0\): the right branch rises steadily, every output appearing exactly once. Swap and solve: \(x = y^2\) with \(y \geq 0\) gives \(y = \pm\sqrt{x}\) &mdash; a fork &mdash; and the restriction decides it: since \(y \geq 0\), take the \(+\) sign.</p>
+    <p style="text-align: center;">\(f(x) = x^2,\; x \geq 0 \qquad\Longleftrightarrow\qquad f^{-1}(x) = \sqrt{x}\)</p>
+    <p>Had we chosen the left branch instead &mdash; \(x \leq 0\) &mdash; the same algebra with \(y \leq 0\) takes the \(-\) sign: \(f^{-1}(x) = -\sqrt{x}\). Both restrictions are legitimate; each branch owns a perfectly good inverse.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> On \([0, \infty)\), \(f^{-1}(x) = \sqrt{x}\); on \((-\infty, 0]\), \(f^{-1}(x) = -\sqrt{x}\). Convention prefers the right branch &mdash; and now you know the secret history of a symbol you have used for years: <strong>the principal square root <em>is</em> a domain restriction</strong>. The reason \(\sqrt{9}\) means 3 and only 3 (the convention that drove all of Lesson 3-10) is that mathematicians long ago restricted the squaring function to \(x \geq 0\) and named that branch's inverse \(\sqrt{\phantom{x}}\).</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Restriction Is Honest &mdash; and the &plusmn; Fork Is Where It Pays</strong></h4>
+        <p>Restricting a domain changes no outputs and falsifies nothing. It only shrinks the set of inputs under discussion until every output has one owner &mdash; the precondition for answering in reverse. Think of it as narrowing a question until it has a single truthful answer.</p>
+        <ul>
+            <li><strong>Where to cut:</strong> at the fold &mdash; the vertex of a parabola, the corner of an absolute value &mdash; because the fold is exactly where the graph turns back and begins repeating its outputs.</li>
+            <li><strong>The fork:</strong> solving the swapped equation for \(y\) will produce a \(\pm\) (undoing a square always does). The \(\pm\) is not an answer; it is a <em>decision point</em>. The restriction you chose tells you the sign: if the branch has \(y \geq k\), take \(+\); if \(y \leq k\), take \(-\). Keeping both signs is not generosity &mdash; it reassembles the whole parabola and destroys the function property you just paid for.</li>
+            <li><strong>The bookkeeping:</strong> the inverse's domain is the <em>restricted</em> function's range &mdash; automatically, by yesterday's exchange. State it every time; an inverse without its domain is half an answer.</li>
+        </ul>
+        <p style="margin-bottom: 0;">Guard-and-judge, in new clothing: the restriction is a guard posted <em>before</em> the algebra, and resolving the \(\pm\) against it is the judgment. Same discipline, new doorway.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Restrict \(f(x) = (x - 2)^2\) to \(x \geq 2\) and find the inverse. Then find the inverse for the opposite choice, \(x \leq 2\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The fold is at the vertex \((2, 0)\). On \(x \geq 2\) the function rises from 0, so its range is \([0, \infty)\). Swap and solve:</p>
+    <p style="text-align: center;">\(x = (y - 2)^2, \quad y \geq 2\)</p>
+    <p style="text-align: center;">\(\pm\sqrt{x} = y - 2\)</p>
+    <p>Resolve the fork: \(y \geq 2\) means \(y - 2 \geq 0\), so take the positive root:</p>
+    <p style="text-align: center;">\(f^{-1}(x) = 2 + \sqrt{x}, \quad x \geq 0\)</p>
+    <p>Check with a point: \(f(5) = 9\), and \(f^{-1}(9) = 2 + 3 = 5\) &#10003;. For the opposite branch, \(x \leq 2\): now \(y - 2 \leq 0\), so the fork resolves the other way, \(f^{-1}(x) = 2 - \sqrt{x}\), still with domain \(x \geq 0\). Check: on this branch \(f(-1) = 9\), and \(2 - \sqrt{9} = -1\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Right branch: \(f^{-1}(x) = 2 + \sqrt{x}\); left branch: \(f^{-1}(x) = 2 - \sqrt{x}\); both on domain \([0, \infty)\). Same rule, same algebra, opposite signs &mdash; the restriction, not the algebra, is what decides. This is why declaring your restriction is not optional paperwork: it is the premise on which the sign of your entire answer rests.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Restrict \(f(x) = x^2 + 4x + 7\) to make it invertible, and find the inverse of the restricted function.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The fold is hidden in standard form, so complete the square first:</p>
+    <p style="text-align: center;">\(f(x) = x^2 + 4x + 7 = (x^2 + 4x + 4) + 3 = (x + 2)^2 + 3\)</p>
+    <p>Vertex \((-2, 3)\); restrict to the right branch, \(x \geq -2\), where the range is \([3, \infty)\). Swap and solve, guard first:</p>
+    <p style="text-align: center;">\(x = (y + 2)^2 + 3, \quad y \geq -2\)</p>
+    <p style="text-align: center;">\(x - 3 = (y + 2)^2\)</p>
+    <p style="text-align: center;">\(\pm\sqrt{x - 3} = y + 2\)</p>
+    <p>The restriction \(y \geq -2\) makes \(y + 2 \geq 0\): take \(+\).</p>
+    <p style="text-align: center;">\(f^{-1}(x) = -2 + \sqrt{x - 3}, \quad x \geq 3\)</p>
+    <p>Point check: \(f(1) = 1 + 4 + 7 = 12\), and \(f^{-1}(12) = -2 + \sqrt{9} = 1\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> On \([-2, \infty)\), \(f^{-1}(x) = -2 + \sqrt{x - 3}\) with domain \([3, \infty)\). Notice where that domain came from: not from the formula \(\sqrt{x-3}\) alone, but from the restricted function's <em>range</em> &mdash; the two agree, as the Inverse Dictionary says they must. When they agree, you have evidence the whole analysis hangs together; when they disagree, one of your steps is lying.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Find the largest domain containing \(x = 3\) on which \(f(x) = |x + 1|\) is one-to-one, and find the inverse of \(f\) restricted to it.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The fold of an absolute value is its corner, here at \(x = -1\). To the right of the corner the graph is the rising line \(y = x + 1\); to the left, the falling line \(y = -x - 1\). The largest one-to-one territory containing \(x = 3\) is therefore \([-1, \infty)\) &mdash; push the left edge past \(-1\) and outputs start repeating (\(f(-2) = 1 = f(0)\)).</p>
+    <p>On that branch, \(f(x) = x + 1\) exactly, with range \([0, \infty)\). Swap and solve: \(x = y + 1\) gives \(y = x - 1\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Domain \([-1, \infty)\); \(f^{-1}(x) = x - 1\) with domain \([0, \infty)\). Check: \(f\!\left(f^{-1}(x)\right) = |x - 1 + 1| = |x| = x\) for \(x \geq 0\) &#10003;. No square, no \(\pm\) &mdash; but the restriction still did the essential work of choosing which line, of the two glued at the corner, the inverse answers from.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Horizon: Why arcsin, arccos, and arctan Will Exist</strong></h4>
+        <p>Mark this lesson. Next spring, in Unit 7, you will meet the sine function &mdash; a wave that rises and falls and repeats forever. A parabola fails the horizontal line test twice per output; <strong>a wave fails it infinitely often</strong>: the output \(\frac{1}{2}\), for instance, is produced by infinitely many inputs marching down the number line in both directions. If sine is ever to answer questions in reverse &mdash; and it must, because &ldquo;what angle produced this ratio?&rdquo; is the working question of surveying, navigation, and astronomy &mdash; then someone has to make today's exact move on it.</p>
+        <p style="margin-bottom: 0;">Someone did. Mathematicians restricted sine to a single principal arch of its wave, one branch on which it is one-to-one, and named the restricted function's inverse <strong>arcsine</strong> (\(\arcsin\), also written \(\sin^{-1}\)). The same convention, applied to cosine and tangent, creates <strong>arccosine</strong> and <strong>arctangent</strong>. That is the entire origin story of three functions sitting on your calculator right now: each is nothing more &mdash; and nothing less &mdash; than <em>today's move, applied to a wave</em>. When you meet them in Unit 7, you will not be learning something new; you will be recognizing something you did in the fall.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Choose the Branch, Watch the Fork Resolve</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), make the restriction visible &mdash; Desmos's curly-brace syntax from Lesson 3-11 is exactly the tool:</p>
+        <ol>
+            <li>Graph the full parabola <strong>y = (x - 2)^2</strong>, then its reflection <strong>x = (y - 2)^2</strong>. The reflection is a sideways parabola &mdash; slide a vertical line across it mentally and watch it fail: two outputs for one input. This is what &ldquo;no inverse&rdquo; looks like.</li>
+            <li>Now restrict: replace the first equation with <strong>y = (x - 2)^2 {x &gt;= 2}</strong> and the second with <strong>x = (y - 2)^2 {y &gt;= 2}</strong>. Half the parabola, half the reflection &mdash; and the surviving reflected piece passes the vertical line test. Add dashed <strong>y = x</strong> and see the mirror pair.</li>
+            <li>Check the algebra against it: graph <strong>y = 2 + sqrt(x)</strong>. It lands exactly on the restricted reflection. Then try the wrong sign, <strong>y = 2 - sqrt(x)</strong> &mdash; it traces the <em>other</em> branch's inverse, the one your restriction declined. The \(\pm\) fork, drawn in two colors.</li>
+            <li>Honors experiment: add a slider <strong>a</strong> and graph <strong>y = (x - a)^2 {x &gt;= a}</strong> with <strong>y = a + sqrt(x)</strong>. Drag \(a\) and watch the branch and its inverse travel together &mdash; the construction is uniform in the vertex. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Restrict \(f(x) = x^2 - 2x\) to a branch and find the inverse of the restricted function. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Complete the square: \(f(x) = (x - 1)^2 - 1\); vertex \((1, -1)\). Restrict to \(x \geq 1\); range \([-1, \infty)\). Swap: \(x = (y-1)^2 - 1\) with \(y \geq 1\), so \((y - 1)^2 = x + 1\) and \(y - 1 = +\sqrt{x + 1}\) (positive root since \(y \geq 1\)). Inverse: \(f^{-1}(x) = 1 + \sqrt{x + 1}\), domain \([-1, \infty)\). Check: \(f(3) = 9 - 6 = 3\) and \(f^{-1}(3) = 1 + 2 = 3\) &#10003;.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Restrict \(f(x) = 9 - x^2\) to \(x \leq 0\) and find the inverse, resolving the fork with care.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            On \(x \leq 0\) the range is \((-\infty, 9]\). Swap: \(x = 9 - y^2\) with \(y \leq 0\), so \(y^2 = 9 - x\) and \(y = \pm\sqrt{9 - x}\). The restriction \(y \leq 0\) takes the negative root: \(f^{-1}(x) = -\sqrt{9 - x}\), domain \((-\infty, 9]\). Check: \(f(-2) = 9 - 4 = 5\) and \(f^{-1}(5) = -\sqrt{4} = -2\) &#10003;.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Keeping the \(\pm\) in the final answer &mdash; writing \(f^{-1}(x) = 2 \pm \sqrt{x}\) &ldquo;to be safe.&rdquo; That is not safety; it is surrender. A rule that outputs two values for one input is not a function, so the \(\pm\) version cannot be anyone's inverse &mdash; it silently un-restricts the domain and rebuilds the very ambiguity you cut away. The \(\pm\) is a fork in the road, and your declared restriction is the signpost that chooses: \(y \geq k\) takes \(+\), \(y \leq k\) takes \(-\). One branch in, one sign out &mdash; every time. (Its twin mistake: reporting the inverse without its domain. The formula \(2 + \sqrt{x}\) alone is half an answer; \(2 + \sqrt{x},\; x \geq 0\) is the whole one.)</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The &ldquo;arc&rdquo; in <em>arcsine</em> is not decoration &mdash; it is geometry. On a circle of radius 1, the length of an arc equals the angle that subtends it (that is what &ldquo;radian&rdquo; will mean next spring). So &ldquo;the arc whose sine is \(\frac{1}{2}\)&rdquo; is literally a length of circular arc &mdash; and <em>arcsin</em> abbreviates exactly that phrase, a usage that settled into European mathematics in the 1700s. The name records the question the function answers: not &ldquo;what is the sine of this angle?&rdquo; but the courteous reverse, &ldquo;what angle &mdash; what arc &mdash; produced this sine?&rdquo;</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Today's move was a compromise with a folded graph: when a function repeats its outputs, we do not force an inverse it cannot honestly give &mdash; we narrow the domain to one branch, let the restriction resolve the \(\pm\) fork, and read the inverse's domain off the branch's range. You saw the move create the principal square root retroactively &mdash; a convention you have obeyed since Algebra 2 turns out to be a domain restriction wearing a symbol &mdash; and you saw the flag planted for spring: arcsine, arccosine, and arctangent are this lesson, applied to waves. Tomorrow the unit gathers itself: inverses go to work on real questions &mdash; conversions, ciphers, budgets &mdash; and we formally close a door left ajar in Unit 3, where a certain function was <em>introduced</em> to you as an inverse before you owned the machinery to build one. Bring today's discipline; tomorrow it earns its wages.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Restricting a domain removes inputs but changes no outputs. Why is that enough to create an inverse where none existed &mdash; what, precisely, does the narrowing repair?</p>
+    <p>2. The \(\pm\) fork appears in the algebra of every restricted quadratic. What decides the sign, and what silently goes wrong if you keep both?</p>
+    <p>3. Why must the inverse's domain equal the <em>restricted</em> function's range &mdash; and how does checking that agreement audit your whole solution?</p>
+    <p>4. A wave fails the horizontal line test infinitely often. Using only today's ideas, predict what mathematicians had to do before an &ldquo;inverse sine&rdquo; could exist &mdash; and why your calculator's \(\sin^{-1}\) key returns exactly one answer.</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">4-10 &middot; Restricting the Domain</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

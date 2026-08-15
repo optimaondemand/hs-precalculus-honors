@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-1</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-1</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-1</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Slicing the Cone: The Family of Conic Sections</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to describe how the circle, ellipse, parabola, and hyperbola each arise as a plane slicing a double cone, and predict the conic from the plane's tilt.</p></li>
+        <li><p>I will be able to classify a second-degree equation as a circle, ellipse, parabola, or hyperbola by inspecting its squared terms.</p></li>
+        <li><p>I will be able to explain why conics are relations rather than functions &mdash; and why letting go of the vertical line test widens the geometry we can describe.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Conic section</strong>: Any curve produced when a plane intersects a double cone &mdash; a circle, ellipse, parabola, or hyperbola. The name says exactly what it is: a <em>section</em> (a cut) of a <em>cone</em>.</p>
+    <p><strong>Double-napped cone</strong>: Two infinite cones joined tip to tip. Spin a line about an axis it crosses at a fixed angle, and this is the surface it sweeps. Each half is a <strong>nappe</strong> (French for &ldquo;sheet&rdquo;).</p>
+    <p><strong>Generator</strong>: Any one of the straight lines lying on the cone's surface &mdash; a single position of the spinning line that <em>generates</em> the cone. The tilt of the cutting plane <em>relative to a generator</em> is what decides everything today.</p>
+    <p><strong>Apex</strong>: The point where the two nappes meet. A plane passing through the apex produces the <strong>degenerate conics</strong>: a point, a line, or a pair of crossed lines.</p>
+    <p><strong>Locus</strong>: A set of all points satisfying a stated geometric condition &mdash; from the Latin for &ldquo;place.&rdquo; This unit's curves are defined by conditions, not by formulas; the word will head every lesson from here to Week 17.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>For four units, every curve you have drawn began as a <em>rule</em>: feed in \(x\), receive \(f(x)\), plot the point. Unit 4 closed with functions in mutual relationship &mdash; composed, combined, inverted &mdash; but always functions, always obedient to the vertical line test. Today the course turns a corner. The curves of Unit 5 are defined not by rules but by <strong>geometric conditions</strong>: cut a cone with a plane and see what shape falls out; collect every point equidistant from a fixed point and a fixed line and see what curve assembles itself. Around 350 BC, the Greek geometer <strong>Menaechmus</strong> discovered these curves while attacking a famous puzzle &mdash; doubling the volume of a cube &mdash; and a century later <strong>Apollonius of Perga</strong> wrote the eight-volume <em>Conics</em>, so complete a treatment that it ruled the subject for eighteen hundred years. Apollonius studied the family for the pure love of its geometry. He could not have known that in 1609 <strong>Johannes Kepler</strong> would find one of his curves traced across the sky by the planet Mars, or that his parabola would one day gather starlight in the dish of a radio telescope. That is the quiet theme of this unit &mdash; <strong>service</strong>: mathematics pursued honestly for its own sake, standing ready across eighteen centuries for the moment it is needed.</p>
+
+    <p>Begin with the surface itself. Take a vertical <strong>axis</strong>, and a line crossing it at a fixed angle at a fixed point. Now spin the line about the axis. It sweeps out two infinite cones joined tip to tip at the <strong>apex</strong> &mdash; the <strong>double-napped cone</strong>. Every straight line lying on the surface is a <strong>generator</strong>. The cone is not a solid, and it is not the ice-cream cone of ordinary speech: both nappes run on forever. Now bring in a plane and cut. The tilt of the plane &mdash; measured against the slant of the generators &mdash; determines which member of the family appears.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>The Four Slices</strong></h4>
+        <ul>
+            <li><strong>Circle</strong> &mdash; the plane is exactly <strong>perpendicular to the axis</strong>. The cut wraps once around the nappe at constant distance: a perfectly round closed curve.</li>
+            <li><strong>Ellipse</strong> &mdash; the plane <strong>tilts, but less steeply than the generators</strong>. It still passes all the way through one nappe, so the curve still closes &mdash; a stretched circle.</li>
+            <li><strong>Parabola</strong> &mdash; the plane is <strong>exactly parallel to one generator</strong>. It chases that edge forever without ever crossing it, so the curve opens and never closes: one infinite branch.</li>
+            <li><strong>Hyperbola</strong> &mdash; the plane tilts <strong>steeper than the generators</strong>. Now it cannot avoid the second nappe: the cut pierces both sheets, and the curve has <strong>two branches</strong>, one from each.</li>
+        </ul>
+        <p style="margin-bottom: 0;">One surface, one plane, one continuously turning tilt &mdash; and a whole family of curves, each handing off to the next. If the plane passes through the <strong>apex</strong>, the same three tilts produce the family's shadows, the <strong>degenerate conics</strong>: a single point, a single line, or a pair of crossed lines.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>A plane cuts a double-napped cone. Name the conic in each case, with the reason: (a) the plane is tilted, misses the apex, cuts only one nappe, and passes all the way through it; (b) the plane is parallel to exactly one generator; (c) the plane is parallel to the cone's axis.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>(a) Cutting all the way through one nappe means the curve closes on itself; the tilt (not perpendicular to the axis) stretches it. This is an <strong>ellipse</strong>.</p>
+    <p>(b) Parallel to one generator is the knife-edge case: the plane never crosses the edge it runs beside, so the curve never closes &mdash; and it never reaches the other nappe either. One open branch: a <strong>parabola</strong>.</p>
+    <p>(c) A plane parallel to the axis is tilted more steeply than any generator (the generators lean; the axis does not). Steeper than the generators means both nappes are pierced. Two branches: a <strong>hyperbola</strong>.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> (a) ellipse &nbsp;(b) parabola &nbsp;(c) hyperbola. In every case the deciding question is the same: <em>how does the plane's tilt compare with the tilt of a generator?</em></p>
+
+    <p>Descartes taught us in Unit 5's ancestor subjects that every curve in the plane can be captured by an equation. All four conics are captured by <strong>second-degree equations</strong> &mdash; equations in \(x\) and \(y\) whose highest-power terms are squares. You will spend this unit deriving those equations one curve at a time; today you learn to recognize the family members at a glance.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Reading a Conic by Inspection</strong> <span style="font-size: 14px; color: #1a2340;">(no \(xy\) term)</span></h4>
+        <ul>
+            <li><strong>Only one variable squared</strong> (\(x^2\) but not \(y^2\), or the reverse) &rarr; <strong>parabola</strong>.</li>
+            <li><strong>Both squared, coefficients equal</strong> (same sign, same number) &rarr; <strong>circle</strong>.</li>
+            <li><strong>Both squared, same sign, different coefficients</strong> &rarr; <strong>ellipse</strong>.</li>
+            <li><strong>Both squared, opposite signs</strong> &rarr; <strong>hyperbola</strong>.</li>
+        </ul>
+        <p style="margin-bottom: 0;">The parallel is exact: on the cone, the tilt of the plane decides the curve; on the page, the pattern of the squared terms decides it. Two languages, one family &mdash; and the whole unit is the dictionary between them.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Classify each equation by inspection: &nbsp; &#9312; \(x^2 + y^2 = 49\) &emsp; &#9313; \(9x^2 + 25y^2 = 225\) &emsp; &#9314; \(y^2 - 8x = 0\) &emsp; &#9315; \(4y^2 - 9x^2 = 36\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; Both variables squared, coefficients both 1 &mdash; equal. <strong>Circle</strong> (radius 7, as we confirm tomorrow).</p>
+    <p>&#9313; Both squared, both positive, coefficients 9 and 25 &mdash; same sign, different sizes. <strong>Ellipse</strong>. Dividing by 225 dresses it in standard clothes: \(\frac{x^2}{25} + \frac{y^2}{9} = 1\).</p>
+    <p>&#9314; Only \(y\) is squared; \(x\) appears to the first power. <strong>Parabola</strong>: \(y^2 = 8x\), opening sideways &mdash; wait for Lesson 5-3.</p>
+    <p>&#9315; Both squared with opposite signs (\(+4y^2\), \(-9x^2\)). <strong>Hyperbola</strong>: dividing by 36 gives \(\frac{y^2}{9} - \frac{x^2}{4} = 1\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> circle, ellipse, parabola, hyperbola &mdash; the whole family in four lines.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>What does each equation describe, and which slice-through-the-apex is it? &nbsp; &#9312; \(x^2 + y^2 = 0\) &emsp; &#9313; \(x^2 - y^2 = 0\) &emsp; &#9314; \(x^2 + y^2 = -4\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; A sum of squares is zero only when both squares are zero: the single point \((0,0)\). This is the circle/ellipse tilt passing through the apex &mdash; the closed curve shrunk to a point.</p>
+    <p>&#9313; Factor: \(x^2 - y^2 = (x-y)(x+y) = 0\), so \(y = x\) or \(y = -x\) &mdash; <strong>two lines crossing at the origin</strong>. This is the hyperbola tilt through the apex: the two branches flattened into two crossed generators.</p>
+    <p>&#9314; A sum of squares is never negative. <strong>No points at all</strong> &mdash; the equation describes the empty set. No slice of a real cone produces it; the algebra is telling you the honest truth that nothing is there.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> a point, a pair of crossed lines, and the empty set. The degenerate conics are not exotic exceptions &mdash; they are exactly what the family does when the plane grazes the apex, and the algebra reports each one faithfully.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Is the circle \(x^2 + y^2 = 49\) the graph of a function? Solve for \(y\) and explain what the algebra reveals.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Solve for \(y\):</p>
+    <p style="text-align: center;">\(y^2 = 49 - x^2\)</p>
+    <p style="text-align: center;">\(y = \pm\sqrt{49 - x^2}\)</p>
+    <p>The \(\pm\) is the confession: for every \(x\) strictly between \(-7\) and \(7\), the circle carries <strong>two</strong> points &mdash; one above the axis, one below. A vertical line through \(x = 3\) meets the circle at \((3, \sqrt{40})\) and \((3, -\sqrt{40})\). The vertical line test fails, so the circle is not a function; it is a <strong>relation</strong>.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> No &mdash; and this is a feature, not a defect. \(y = \sqrt{49 - x^2}\) is the upper semicircle and \(y = -\sqrt{49-x^2}\) the lower: two functions stitched into one richer curve. Unit 4 taught you to <em>restrict</em> a relation to salvage a function; Unit 5 stops apologizing and studies the whole curve. Whole circles, whole ellipses, whole hyperbolas &mdash; geometry first, rules second.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#129405; Your VR Session: Slicing the Cone</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">25 min</span></h4>
+        <p><strong>What you're doing.</strong> Apollonius could only imagine the cutting plane; you get to hold it. In this Session you will manipulate a translucent double cone and a cutting plane with your own hands, produce all four conic sections yourself, and label each one. This is the one fact of the unit that a page cannot teach and a headset can: the family is <em>continuous</em> &mdash; tilt the plane and watch one conic melt into the next.</p>
+        <p><strong>What you'll need.</strong> Your VR headset (preferred) or the ENGAGE desktop app; this lesson read first.</p>
+        <p><strong>How to join.</strong></p>
+        <ul>
+            <li><strong>Session type:</strong> solo, persistent &mdash; your placed work will still be there if you return.</li>
+            <li><strong>Session ID:</strong> posted beside this lesson in the Canvas module.</li>
+            <li><strong>Location:</strong> Conic Sections Lab.</li>
+            <li><strong>On arrival:</strong> you spawn beside a whiteboard holding your first instruction; the translucent double cone and its cutting plane stand at the center of the Location.</li>
+        </ul>
+        <p><strong>What to do, in order.</strong></p>
+        <ol>
+            <li>Read the whiteboard at the spawn point, then walk to the double cone. Grab the cutting plane.</li>
+            <li>Set the plane <strong>perpendicular to the cone's axis</strong>. The glowing cross-section is a circle. Place a sticky note on it naming the conic and describing the plane's tilt <em>relative to the cone's edge (the generator)</em>. Take a snapshot.</li>
+            <li>Tilt the plane slightly &mdash; less steeply than the cone's edge. Sticky note (name + tilt), snapshot: the <strong>ellipse</strong>.</li>
+            <li>Keep tilting until the plane runs <strong>exactly parallel to one edge</strong> of the cone &mdash; the cross-section springs open. Sticky note, snapshot: the <strong>parabola</strong>. Nudge the tilt a hair each way and watch how knife-edge this case is.</li>
+            <li>Tilt steeper still, until the plane cuts <strong>both nappes</strong>. Two branches appear. Sticky note, snapshot: the <strong>hyperbola</strong>.</li>
+            <li>On the whiteboard, write a two-sentence claim connecting the plane's tilt to the conic type &mdash; your own words, covering all four cases. Take a final snapshot of the whiteboard.</li>
+        </ol>
+        <p style="margin-bottom: 0;"><strong>What to submit.</strong> One artifact: your <strong>snapshot set</strong> &mdash; the four labeled slices plus the whiteboard claim &mdash; included as pages in your Assignment 5-1 PDF. About 25 minutes in-headset.</p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE FLASHLIGHT INTERROGATION</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A flashlight throws a cone of light, which makes any nearby wall a cutting plane. After your VR session, put your AI tutor to work: ask it, <em>&ldquo;When I hold a flashlight so its beam runs parallel to a wall, the bright edge on the wall is a hyperbola branch. Explain why, using the geometry of a plane cutting a cone.&rdquo;</em></p>
+            <p style="margin-bottom: 0;">Then <strong>supervise the answer</strong> against what your own hands just did in the Conic Sections Lab. A good explanation must say that the wall-plane is parallel to the beam's <em>axis</em> &mdash; steeper than any generator &mdash; which is the hyperbola tilt; and it must account for why you see only <strong>one</strong> branch (the second nappe of the light cone points backward out of the flashlight, and no light lives there). AIs asked this question commonly call the curve a parabola, or forget the invisible second nappe entirely. If yours does, correct it and make it repair the explanation &mdash; you hold the cone; the machine only describes it. The mathematician supervises the tool.</p>
+        </div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Classify by inspection &mdash; &#9312; \(3x^2 + 3y^2 - 18 = 0\) &nbsp; &#9313; \(x^2 - y^2 = 1\) &nbsp; &#9314; \(x^2 + 6y = 0\). Decide on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            &#9312; Both squared, equal coefficients (divide by 3: \(x^2 + y^2 = 6\)): <strong>circle</strong>, radius \(\sqrt{6}\). &#9313; Both squared, opposite signs: <strong>hyperbola</strong>. &#9314; Only \(x\) squared: <strong>parabola</strong>, \(x^2 = -6y\), opening downward.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: In one or two sentences, explain why the parabola's slice never closes into a loop <em>and</em> never picks up a second branch.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            The plane is parallel to exactly one generator &mdash; the one line of the cone it would have to cross either to wrap around the nappe (closing the curve) or to climb into the second nappe (adding a branch). Parallel lines never meet, so it does neither: the cut runs on forever as a single open branch.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Calling a hyperbola &ldquo;two parabolas back to back.&rdquo; The resemblance is skin-deep and the geometry refuses it: a hyperbola's branches straighten out toward two straight-line <strong>asymptotes</strong>, while a parabola's arms keep curving forever and approach no line at all. They come from different tilts &mdash; <em>steeper than</em> the generator versus <em>exactly parallel to</em> it &mdash; and no tilt produces two parabolas. When the equations arrive (5-3 and 5-9), the difference will be printed right in the signs.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Apollonius named the three non-circular conics, and you already use all three names in English class. <em>Ellipsis</em> (&hellip;) marks something left out &mdash; a <strong>deficiency</strong>; an ellipse's plane falls short of the generator's slant. <em>Hyperbole</em> is exaggeration &mdash; an <strong>excess</strong>; the hyperbola's plane overshoots that slant. And a <em>parable</em> is a story laid exactly alongside life &mdash; a <strong>precise application</strong>; the parabola's plane lies exactly alongside a generator. One Greek family of words, serving rhetoric and geometry alike for twenty-two centuries.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>One cone, one plane, and a single turning tilt gave you the entire cast of Unit 5: the circle at exactly perpendicular, the ellipse across a whole range of gentle tilts, the parabola at one knife-edge angle, the hyperbola beyond it &mdash; with the degenerate point, line, and crossed lines waiting at the apex. You matched each slice to its algebraic fingerprint, and you watched the family flow together in the Conic Sections Lab with the cutting plane in your own hand. From here the unit takes the curves one at a time, and each will surrender its equation to the same weapon: a locus condition, the distance formula, and &mdash; when the equation arrives scrambled &mdash; <strong>completing the square</strong>, the master key you cut in Unit 2, which will open every general form in this unit. Tomorrow we start with the simplest slice and the oldest locus of all: every point at one fixed distance from a center. The circle, finally, gets its equation.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What single geometric comparison &mdash; the plane's tilt against the generator's &mdash; decides which conic appears, and why is the parabola a knife-edge case while the ellipse owns a whole range of tilts?</p>
+    <p>2. Units 1&ndash;4 defined curves by rules; Unit 5 defines them by geometric conditions. What is gained by letting go of the vertical line test?</p>
+    <p>3. Why do the degenerate conics &mdash; a point, a line, crossed lines &mdash; appear exactly when the plane passes through the apex, and how does the algebra report each one?</p>
+    <p>4. Apollonius wrote the <em>Conics</em> eighteen centuries before Kepler found an ellipse in the sky. What does that gap say about the service that pure mathematics quietly renders?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-1 &middot; Slicing the Cone: The Family of Conic Sections</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-4</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-4</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-4</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Exponential Models: Growth, Decay, and Interest</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to build and use doubling-time models \(A(t) = A_0 \cdot 2^{t/d}\) and half-life models \(A(t) = A_0 \left(\frac{1}{2}\right)^{t/h}\).</p></li>
+        <li><p>I will be able to apply the compound interest formula to compare frequencies and account offers.</p></li>
+        <li><p>I will be able to view one growth story through both lenses &mdash; geometric sequence and exponential function &mdash; and translate between them.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Doubling time</strong>: The fixed span \(d\) in which a growing quantity multiplies by 2 &mdash; the same span from <em>any</em> starting moment, a property only exponentials have.</p>
+    <p><strong>Half-life</strong>: The fixed span \(h\) in which a decaying quantity falls to half &mdash; a coinage of early atomic physics (originally &ldquo;half-life period&rdquo;): not half of a lifetime, but the lifetime of each successive half.</p>
+    <p><strong>Exponential decay</strong>: An exponential model with base below 1 &mdash; a constant <em>fraction</em> lost per unit time, so the loss is steep at first and gentle forever after.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Every living thing carries a clock it did not wind. Cosmic rays striking the upper atmosphere continually create carbon-14, a radioactive cousin of ordinary carbon, and every plant and animal absorbs it through food and air for as long as it lives. At death the intake stops, and the carbon-14 begins its patient exit: half of it gone in 5,730 years, half of what remains in the next 5,730, and so on &mdash; a decay so regular that in the 1940s the chemist Willard Libby realized it could be read backward. Measure the fraction of carbon-14 remaining in a parchment, a bone, a charred hearth, and you can tell <em>when its clock stopped</em>. Radiocarbon dating won Libby the Nobel Prize and rewrote archaeology &mdash; and its entire mechanism is a function you learned to write on Monday: an exponential with base \(\frac{1}{2}\).</p>
+    <p>Today is the toolkit lesson. This week built the exponential function (3-1), drew it (3-2), and found its natural base (3-3); now we shape it to the three stories it tells most often &mdash; doubling, halving, and interest. The craft is in the <em>exponent</em>. If a quantity doubles every \(d\) units of time, then after time \(t\) it has doubled \(\frac{t}{d}\) times, so:</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Two Chassis: Doubling and Halving</strong></h4>
+        <ul>
+            <li><strong>Doubling time \(d\):</strong> \(A(t) = A_0 \cdot 2^{t/d}\) &mdash; the exponent \(\frac{t}{d}\) counts <em>how many doublings have elapsed</em>.</li>
+            <li><strong>Half-life \(h\):</strong> \(A(t) = A_0 \cdot \left(\dfrac{1}{2}\right)^{t/h}\) &mdash; the exponent counts how many halvings have elapsed.</li>
+            <li><strong>Sanity check, always:</strong> at \(t = d\) the first gives \(A_0 \cdot 2^1 = 2A_0\) &#10003;; at \(t = h\) the second gives \(\frac{1}{2}A_0\) &#10003;. One substitution proves your model tells the story.</li>
+            <li><strong>Units must match:</strong> \(t\) and \(d\) (or \(h\)) in the <em>same</em> unit &mdash; both hours, both years &mdash; or the exponent counts nonsense.</li>
+        </ul>
+        <p style="margin-bottom: 0;">These are ordinary exponentials \(ab^t\) in tailored clothing: base \(2^{1/d}\) or \(\left(\frac{1}{2}\right)^{1/h}\) per unit time. The tailoring just puts the story's natural rhythm &mdash; the doubling, the halving &mdash; where you can see it.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Carbon-14 has a half-life of 5,730 years. What fraction of a sample's original carbon-14 remains 1,000 years after death &mdash; and what does that mean for dating?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>With \(A_0 = 1\) (a whole sample) and \(h = 5730\):</p>
+    <p style="text-align: center;">\(A(1000) = \left(\dfrac{1}{2}\right)^{1000/5730} = \left(\dfrac{1}{2}\right)^{0.1745\ldots} \approx 0.886\)</p>
+    <p>The exponent is the number of half-lives elapsed &mdash; about 0.17 of one &mdash; so the sample has taken only a fraction of its first halving step.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> About <strong>88.6%</strong> remains. Run it backward and you have Libby's whole science: an archaeologist who measures 88.6% of the expected carbon-14 concludes the organism died roughly 1,000 years ago. Notice the model needed a fractional exponent &mdash; 0.1745 half-lives &mdash; and Monday's smooth curve, defined at <em>every</em> real input, is precisely what makes &ldquo;partway through a halving&rdquo; meaningful.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A bacteria culture starts at 200 cells and doubles every 3 hours. Write the model; find the population after 12 hours, and after 4.5 hours.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Chassis: \(A(t) = 200 \cdot 2^{t/3}\), with \(t\) in hours. Sanity check: \(A(3) = 200 \cdot 2 = 400\) &#10003; &mdash; one doubling after one doubling time.</p>
+    <p style="text-align: center;">\(A(12) = 200 \cdot 2^{12/3} = 200 \cdot 2^4 = 200 \cdot 16 = 3200\)</p>
+    <p style="text-align: center;">\(A(4.5) = 200 \cdot 2^{4.5/3} = 200 \cdot 2^{1.5} = 200 \cdot 2\sqrt{2} \approx 566\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> After 12 hours, <strong>3,200 cells</strong> &mdash; four clean doublings. After 4.5 hours, about <strong>566 cells</strong>: one-and-a-half doublings, where \(2^{1.5} = 2\sqrt{2}\) puts an exact value under the decimal. The model runs between the doublings as smoothly as at them.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>You deposit \(\$3000\) at 6% for 8 years. Compare annual and monthly compounding &mdash; how much does the finer frequency earn?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Both rungs use \(A = P\left(1 + \frac{r}{n}\right)^{nt}\):</p>
+    <p style="text-align: center;">Annual: \(3000(1.06)^{8} \approx 3000(1.593848) \approx \$4781.54\)</p>
+    <p style="text-align: center;">Monthly: \(3000\left(1 + \tfrac{0.06}{12}\right)^{96} = 3000(1.005)^{96} \approx \$4842.43\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Monthly compounding yields about <strong>$60.89 more</strong> &mdash; real money, though yesterday's ceiling is already in sight: even continuous compounding could only add a few dollars beyond monthly here. When you compare account offers, frequency matters &mdash; but a higher rate matters far more than a finer frequency. Compute both before believing either.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>\(\$1000\) is deposited at 6% compounded monthly. Tell the story twice: once in Unit 1's sequence language, once in this week's function language &mdash; and find the balance after 24 months both ways.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Sequence lens (Unit 1):</strong> each month multiplies the balance by \(1 + \frac{0.06}{12} = 1.005\). That is a recursion, \(b_n = 1.005 \, b_{n-1}\) with \(b_0 = 1000\) &mdash; a geometric sequence with ratio 1.005 &mdash; whose explicit form is \(b_n = 1000(1.005)^n\).</p>
+    <p><strong>Function lens (this week):</strong> \(f(x) = 1000(1.005)^x\), the smooth exponential with initial value 1000 and base 1.005, defined at every real \(x\).</p>
+    <p>The formulas are <em>identical</em>; only the domains differ. The sequence is the function sampled at the integers &mdash; the statement months, dotted along the curve. At \(n = 24\):</p>
+    <p style="text-align: center;">\(b_{24} = 1000(1.005)^{24} \approx \$1127.16\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> <strong>$1,127.16</strong>, by either lens &mdash; necessarily, since the lenses share one formula. This is Unit 1's promise cashed out: the common ratio became a base, the term index became a variable, and everything you proved about geometric sequences &mdash; ratio tests, explicit forms &mdash; carried into the theory of exponential functions intact. Two languages; one mathematics.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Units that do not match, and numbers in the wrong seats. If the doubling time is 3 <em>hours</em>, the exponent \(\frac{t}{3}\) requires \(t\) in hours &mdash; feed it \(t = 2\) days and the model reports two-thirds of a doubling instead of sixteen doublings. Likewise, &ldquo;doubles every 3 hours&rdquo; is a <em>doubling time</em>, not a rate: writing \(200(1.03)^t\) (as if 3 were a percent) or \(200 \cdot 2^{3t}\) (doubling time in the numerator) both produce confident nonsense. <strong>Before trusting any model, run the sanity check: substitute \(t = d\) (or \(t = h\)) and confirm the output is exactly \(2A_0\) (or \(\frac{1}{2}A_0\)).</strong> One line of arithmetic guards the whole solution &mdash; the same guard-then-judge habit you built on rational equations in Unit 2.</div>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: Reading Doubling and Halving off the Graph</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a>, make the models confess their rhythms:</p>
+        <ol>
+            <li>Graph Example 2's culture: <strong>y = 200 &middot; 2^(x/3)</strong>, and the horizon line <strong>y = 400</strong>. Click the intersection: \(x = 3\) &mdash; the doubling time, read straight off the graph. Move the line to \(y = 800\), then \(y = 1600\): the crossings land at \(x = 6\) and \(x = 9\). Equal vertical <em>ratios</em>, equal horizontal <em>steps</em> &mdash; that staircase is what &ldquo;constant doubling time&rdquo; looks like.</li>
+            <li>Now the clock: graph <strong>y = (1/2)^(x/5730)</strong> with the window \(0 \le x \le 20000\), and <strong>y = 0.5</strong>. The intersection sits at \(x = 5730\), the half-life. Slide the line to \(y = 0.886\) and read the crossing near \(x = 1000\) &mdash; Example 1's date, measured graphically.</li>
+            <li>Prefer Excel? Column A: years 0, 500, 1000, &hellip; (fill series); B2: <strong>=(1/2)^(A2/5730)</strong>, fill down &mdash; a printed decay table an archaeologist could use in the field.</li>
+            <li>Every readout in steps 1&ndash;2 is an intersection you <em>clicked</em>, not an equation you solved. The &ldquo;when&rdquo; questions still await their exact tool &mdash; one lesson more. The calculator confirms; your algebra convinces.</li>
+        </ol>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Caffeine leaves the body with a half-life of about 5 hours. You drink a 200 mg coffee at noon. Write the model and find how much caffeine remains at 10 p.m. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(A(t) = 200\left(\frac{1}{2}\right)^{t/5}\), \(t\) in hours. At 10 p.m., \(t = 10\): \(A(10) = 200\left(\frac{1}{2}\right)^{2} = 200 \cdot \frac{1}{4} = 50\) mg &mdash; two clean half-lives, a quarter of the dose still working at bedtime.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: An investment doubles every 9 years. Starting from \(\$5000\), write the model and find the balance after 27 years &mdash; no calculator needed.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(A(t) = 5000 \cdot 2^{t/9}\). At \(t = 27\): \(5000 \cdot 2^{27/9} = 5000 \cdot 2^3 = \$40{,}000\). Three doublings in 27 years &mdash; when the exponent comes out whole, the arithmetic is mental.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">In 1991, hikers in the Alps found a body melting out of a glacier &mdash; so well preserved that police initially treated it as a modern case. Radiocarbon dating told a different story: about 53% of the man's carbon-14 remained, placing his death around 5,300 years ago, before Egypt raised its pyramids. &ldquo;&Ouml;tzi the Iceman&rdquo; is now the most studied human body of the Copper Age &mdash; his tools, his tattoos, even his last meal reconstructed &mdash; and the single number that placed him in time came from the model in Example 1: \(\left(\frac{1}{2}\right)^{t/5730}\), read backward.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The week's arc is complete: a function family defined by constant ratio, drawn by anchor and asymptote, given its natural base by Bernoulli's ceiling, and now fitted to the world's three favorite stories &mdash; doubling, halving, and interest &mdash; with Unit 1's geometric thread cashed out in full: sequence and function, two lenses on one law. But notice what every problem this week had in common: they all ran <em>forward</em>. Given the time, find the amount. The questions the world actually presses hardest run <em>backward</em> &mdash; how long until the investment doubles, how old is the bone, when does the culture reach the threshold &mdash; and four times this week you could only trap or click an answer that deserved to be <em>solved</em>. Next week you get the key: the tool that undoes an exponential exactly, an invention so powerful that for three centuries it was the greatest labor-saving device in the history of calculation. <strong>Logarithms, next week.</strong> Before then: this week's Focus set is <strong>Assignment 3-3</strong> &mdash; the compounding ladder and the continuous model. Finish it before your flex day.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does the exponent \(\frac{t}{d}\) &mdash; time over doubling time &mdash; build a correct model, and what single substitution proves it?</p>
+    <p>2. How can one formula, \(\left(\frac{1}{2}\right)^{t/5730}\), function as a clock for every once-living thing on Earth?</p>
+    <p>3. What exactly is the same, and what is different, between a geometric sequence and the exponential function that shares its formula?</p>
+    <p>4. Which of this week's questions ran backward &mdash; and why does &ldquo;undoing an exponential&rdquo; demand a genuinely new tool?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-4 &middot; Exponential Models: Growth, Decay, and Interest</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

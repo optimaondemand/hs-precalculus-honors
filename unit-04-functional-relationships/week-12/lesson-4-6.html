@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 4-6</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 4</div>
+        <div style="font-size: 13px; color: #666;">Functional Relationships</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">4-6</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Functional Relationships</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">4-6</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Domain and Range of Composite Functions</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to determine the domain of \(f \circ g\) by posting both guards: the inner function's own domain, and the requirement that every inner output land inside the outer function's domain.</p></li>
+        <li><p>I will be able to detect the hidden restrictions that a simplified composite formula conceals, and state composite domains honestly.</p></li>
+        <li><p>I will be able to find the range of a composite function by following its true domain through the chain.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Domain of a composition</strong>: The set of all inputs \(x\) such that \(x\) is in the domain of \(g\) <em>and</em> \(g(x)\) is in the domain of \(f\). Both conditions, always.</p>
+    <p><strong>Hidden restriction</strong>: A domain condition inherited from the inner function that leaves no visible trace in the simplified composite formula &mdash; the restriction is real, but the algebra has erased the evidence.</p>
+    <p><strong>Guard</strong>: Our standing course word for a domain condition posted <em>before</em> the algebra begins &mdash; the same guards you posted for rational functions in Unit 2 and radical equations in Unit 3, now standing watch over a chain.</p>
+    <p><strong>Pedigree</strong>: An informal but useful word for a composite function's ancestry &mdash; which \(f\) and which \(g\) it was born from. A composite's domain is determined by its pedigree, not by its simplified formula.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>For a century and a half after Leibniz named the function, mathematicians quietly assumed that a function simply <em>was</em> its formula. It took until 1837 for Peter Gustav Lejeune Dirichlet to state the modern view plainly: a function is any rule of correspondence assigning one output to each input &mdash; and the <strong>domain is part of the function's very identity</strong>, not an afterthought scribbled beside the formula. Two rules with the same formula but different domains are different functions. Today's lesson is Dirichlet's insight applied to yesterday's constructions: when functions are chained, the composite's domain is inherited from <em>both</em> parents &mdash; and, in the most instructive cases, the simplified formula will look you in the eye and misreport it. This is a domain-of-honesty lesson from start to finish: the formula smiles and says &ldquo;all real numbers&rdquo;; the pedigree keeps the true record.</p>
+    <p>Think again about the courtesy protocol of \(f(g(x))\): \(g\) speaks first, and \(f\) responds to what \(g\) hands it. Two things can go wrong in that exchange. The input \(x\) may be one that \(g\) itself cannot accept &mdash; or \(g\) may accept it and then hand \(f\) a value that \(f\)'s domain refuses. A legal input for the composition must clear <strong>both</strong> checkpoints.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>The Two Guards of \(f \circ g\)</strong></h4>
+        <p>\(x\) belongs to the domain of \(f \circ g\) exactly when:</p>
+        <ul>
+            <li><strong>Guard 1 (the inner gate):</strong> \(x\) is in the domain of \(g\) &mdash; the inner function can receive it; and</li>
+            <li><strong>Guard 2 (the outer gate):</strong> \(g(x)\) is in the domain of \(f\) &mdash; the outer function can receive what the inner one hands over.</li>
+        </ul>
+        <p style="margin-bottom: 0;"><strong>Post both guards before you simplify anything.</strong> Simplification is legal algebra, but it can erase Guard 1's fingerprints from the formula &mdash; and a guard whose evidence has been erased is still on duty.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Let \(f(x) = \sqrt{x}\) and \(g(x) = x - 4\). Find the domain and range of \(f \circ g\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Guard 1:</strong> \(g\) is a polynomial &mdash; it accepts every real number. No restriction. <strong>Guard 2:</strong> \(f\) demands a nonnegative input, so we need \(g(x) \geq 0\):</p>
+    <p style="text-align: center;">\(x - 4 \geq 0 \;\;\Rightarrow\;\; x \geq 4\)</p>
+    <p>The composite is \((f \circ g)(x) = \sqrt{x - 4}\), and here the formula is honest &mdash; the restriction is still visible under the radical.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Domain \([4, \infty)\); range \([0, \infty)\), since the square root delivers every nonnegative value as \(x\) runs through the domain. When only Guard 2 restricts, the composite formula usually still shows the scar &mdash; the interesting trouble starts when Guard 1 is the restrictive one.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Let \(f(x) = x^2\) and \(g(x) = \sqrt{x - 1}\). Find \((f \circ g)(x)\), its domain, and its range.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Guard 1:</strong> \(g\)'s radicand demands \(x - 1 \geq 0\), so \(x \geq 1\). <strong>Guard 2:</strong> \(f\) accepts every real number &mdash; no further condition. Now, and only now, simplify:</p>
+    <p style="text-align: center;">\((f \circ g)(x) = \left(\sqrt{x-1}\,\right)^2 = x - 1\)</p>
+    <p>Read that simplified formula na&iuml;vely and it claims to be a line defined for <em>all</em> real numbers. But the pedigree says otherwise: no input below 1 ever survived the inner gate. The composite equals \(x - 1\) <strong>only on \([1, \infty)\)</strong> &mdash; a ray, not a line. And the range follows from the honest domain: as \(x\) runs through \([1, \infty)\), the output \(x - 1\) runs through \([0, \infty)\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((f \circ g)(x) = x - 1\) with domain \([1, \infty)\) and range \([0, \infty)\). The squaring erased the radical's fingerprints from the formula, but it could not erase the guard. <strong>A composite function's domain is decided at its birth, not at its simplification.</strong> This is the hidden restriction &mdash; and it is exactly the phenomenon your calculator can make visible, below.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Let \(f(x) = \dfrac{1}{x - 1}\) and \(g(x) = \dfrac{2}{x}\). Find \((f \circ g)(x)\) and its domain.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Guard 1:</strong> \(g\) forbids \(x = 0\). <strong>Guard 2:</strong> \(f\) forbids the input 1, so we need \(g(x) \neq 1\):</p>
+    <p style="text-align: center;">\(\dfrac{2}{x} = 1 \;\;\Rightarrow\;\; x = 2, \qquad \text{so the guard is } x \neq 2\)</p>
+    <p><strong>Simplify:</strong></p>
+    <p style="text-align: center;">\((f \circ g)(x) = \dfrac{1}{\frac{2}{x} - 1} = \dfrac{1}{\frac{2 - x}{x}} = \dfrac{x}{2 - x}\)</p>
+    <p><strong>Check</strong> at a trusted point, \(x = 4\): the relay gives \(g(4) = \frac{1}{2}\), then \(f\!\left(\frac{1}{2}\right) = \frac{1}{\frac{1}{2} - 1} = -2\); the formula gives \(\frac{4}{2 - 4} = -2\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((f \circ g)(x) = \dfrac{x}{2 - x}\) with domain \(\{x : x \neq 0 \text{ and } x \neq 2\}\). Interrogate the simplified formula and it confesses to \(x \neq 2\) &mdash; but it has completely forgotten \(x \neq 0\), the inner gate where \(g\) itself fails. One guard visible, one guard hidden: the formula tells the truth and nothing but the truth, yet not the whole truth. Only the pedigree tells the whole truth.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Let \(f(x) = \sqrt{x - 2}\) and \(g(x) = x^2\). Find the domain of \(f \circ g\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Guard 1:</strong> \(g\) accepts everything. <strong>Guard 2:</strong> \(f\) demands input \(\geq 2\), so we need \(x^2 \geq 2\). Solve it honestly &mdash; this is a quadratic inequality, and its solution set has two branches:</p>
+    <p style="text-align: center;">\(x^2 \geq 2 \;\;\Longleftrightarrow\;\; |x| \geq \sqrt{2} \;\;\Longleftrightarrow\;\; x \leq -\sqrt{2} \;\text{ or }\; x \geq \sqrt{2}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((f \circ g)(x) = \sqrt{x^2 - 2}\), with domain \((-\infty, -\sqrt{2}\,] \cup [\sqrt{2}, \infty)\). Notice what Guard 2 really asks: not &ldquo;where is \(x\) legal,&rdquo; but &ldquo;<em>where does \(g\) send \(x\) somewhere legal</em>.&rdquo; The guard stands at \(f\)'s gate but does its arithmetic back at \(g\) &mdash; a condition on the inner function's <em>outputs</em>, translated into a condition on \(x\).</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: The Pedigree in Pixels</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>Desmos composes functions natively, and &mdash; unlike a careless simplifier &mdash; it never forgets a pedigree. At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), put Example 2 on trial:</p>
+        <ol>
+            <li>Define the parents on their own lines: type <strong>g(x) = sqrt(x - 1)</strong> and <strong>f(x) = x^2</strong>. Desmos accepts function definitions exactly as written.</li>
+            <li>On a third line, graph the composition itself: <strong>y = f(g(x))</strong>. Look closely: a ray, launching at \((1, 0)\) and rising to the right &mdash; <em>nothing</em> to the left of \(x = 1\).</li>
+            <li>Now graph the na&iuml;ve simplification on a fourth line: <strong>y = x - 1</strong>. A full line, sailing carelessly through negative territory the true composite never visits. The horizontal gap between the two graphs <em>is</em> the hidden restriction, drawn in pixels.</li>
+            <li>Repeat the experiment on Example 3: define that lesson's \(f\) and \(g\), graph <strong>y = f(g(x))</strong>, and click the curve at \(x = 0\) &mdash; Desmos reports the point as undefined, though the simplified formula \(\frac{x}{2-x}\) would happily have computed \(0\) there.</li>
+        </ol>
+        <p>Desmos evaluates \(f(g(x))\) the honest way &mdash; through the chain, gate by gate &mdash; so its graph obeys the guards automatically. The calculator confirms; your algebra convinces.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: For \(f(x) = \sqrt{x}\) and \(g(x) = 9 - x^2\), find the domain and range of \(f \circ g\). Post both guards on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Guard 1: \(g\) accepts everything. Guard 2: need \(9 - x^2 \geq 0\), i.e. \(x^2 \leq 9\), i.e. \(-3 \leq x \leq 3\). So \((f \circ g)(x) = \sqrt{9 - x^2}\) with domain \([-3, 3]\). Range: the radicand \(9 - x^2\) runs from \(0\) (at \(x = \pm 3\)) up to \(9\) (at \(x = 0\)), so the root runs through \([0, 3]\). (You are looking at the upper half of a circle of radius 3 &mdash; a shape with a starring role waiting in Unit 5.)
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: For \(f(x) = \frac{1}{x}\) and \(g(x) = x + 5\), find the domain of \(f \circ g\) and of \(g \circ f\) &mdash; and notice they differ.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \((f \circ g)(x) = \frac{1}{x + 5}\): Guard 1 is nothing, Guard 2 needs \(x + 5 \neq 0\), so the domain is \(x \neq -5\). \((g \circ f)(x) = \frac{1}{x} + 5\): Guard 1 needs \(x \neq 0\), Guard 2 is nothing, so the domain is \(x \neq 0\). Same two parents, opposite order, different domains &mdash; one more way \(f \circ g\) and \(g \circ f\) are genuinely different functions.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Finding the domain of \(f \circ g\) by interrogating only the <em>simplified</em> formula. In Example 2 that method answers &ldquo;all real numbers&rdquo; and is wrong on an entire half-line; in Example 3 it catches \(x \neq 2\) but waves \(x = 0\) straight through a gate where \(g\) itself fails. The simplified formula is a witness with amnesia: honest about what it remembers, silent about what the algebra erased. <strong>Post both guards from the pedigree first; simplify second; and let the guards, not the survivor formula, write the domain.</strong></div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The word <em>domain</em> comes from the Latin <em>dominium</em> &mdash; lordship, ownership, the estate over which a lord holds authority. The etymology is exact: a function genuinely <em>rules</em> its domain, assigning to every resident input exactly one output, and holds no authority one inch beyond its borders. When Dirichlet made the domain part of a function's identity in 1837, he was, in effect, ruling that a lord and his lands cannot be spoken of separately &mdash; which is why a formula that has forgotten its lands has forgotten part of what it is.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Yesterday you learned how functions chain; today you learned what the chain owes its ancestors. The domain of \(f \circ g\) is guarded twice &mdash; once at the inner gate, once at the outer &mdash; and the deepest lesson was a domain-of-honesty lesson: legal algebra can simplify a formula right past its own restrictions, so the true domain is read from the pedigree, never from the survivor. You watched Desmos honor the guards automatically, and you practiced the discipline of posting them before simplifying, in exactly the spirit of Unit 2's rational guards and Unit 3's radical guards. Tomorrow the chains leave the page and enter the checkout line, the pond, and the factory floor: real processes &mdash; a discount followed by a tax, a spreading ripple followed by an area &mdash; are compositions wearing work clothes, and you will build, evaluate, and solve them in context, units and all.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why must the domain of \(f \circ g\) satisfy two separate conditions, and what does each guard protect against?</p>
+    <p>2. How can a correctly simplified formula misreport its own function's domain &mdash; and which record tells the whole truth instead?</p>
+    <p>3. Guard 2 stands at the outer function's gate, yet its inequality is solved in terms of \(x\). What translation is happening there, and why does it sometimes split the domain into two branches?</p>
+    <p>4. Desmos graphed \(f(g(x))\) with the hidden restriction intact, no guards posted by you at all. What was the calculator doing that the simplified formula was not &mdash; and why does your written algebra still carry the burden of proof?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">4-6 &middot; Domain and Range of Composite Functions</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

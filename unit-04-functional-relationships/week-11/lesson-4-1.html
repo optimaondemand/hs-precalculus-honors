@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 4-1</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 4</div>
+        <div style="font-size: 13px; color: #666;">Functional Relationships</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">4-1</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Functional Relationships</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">4-1</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Functions and Rates of Change Revisited</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to determine a function's domain and range from a formula, a graph, or a table, and say which representation showed me the restriction.</p></li>
+        <li><p>I will be able to compute the average rate of change of a function over an interval from any representation, with correct units attached.</p></li>
+        <li><p>I will be able to interpret an average rate of change in context, and explain why it varies from interval to interval for every function that is not linear.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Average rate of change</strong>: The change in a function's output divided by the change in its input over an interval: \(\dfrac{f(b) - f(a)}{b - a}\). It answers the question <em>how fast, on average, did the output move between these two inputs?</em></p>
+    <p><strong>Delta (&Delta;) notation</strong>: The Greek letter &Delta; (capital <em>delta</em>, for <em>difference</em>) abbreviates &ldquo;change in&rdquo;: \(\Delta y = f(b) - f(a)\) and \(\Delta x = b - a\), so the average rate of change is \(\Delta y / \Delta x\). You have written this ratio before &mdash; it is a slope.</p>
+    <p><strong>Interval</strong>: The stretch of inputs between two values, written \([a, b]\). An average rate of change is meaningless until you name the interval it averages over.</p>
+    <p><strong>Representation</strong>: A way of presenting a function &mdash; formula, graph, table, or verbal description. One function, several portraits; the mathematics must come out the same from every one.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>The word at the head of this unit has a birthday too. In the 1690s, Gottfried Wilhelm Leibniz &mdash; philosopher, diplomat, co-inventor of the calculus &mdash; needed a name for quantities that depend on other quantities, the way the area of a circle depends on its radius or a curve's height depends on where you stand. He chose the Latin <em>functio</em>, &ldquo;a performing.&rdquo; A function <em>performs</em>: feed it an input, and it executes its rule. For three units you have collected these performers one family at a time &mdash; polynomial, rational, exponential, logarithmic, radical, piecewise. Unit 3 closed by setting two functions side by side, comparing their features and finding where they intersect. Unit 4 goes further: for the next three weeks, functions stop performing solo. We study them <strong>in relationship</strong> &mdash; combined, chained, and undone &mdash; and it is a courteous business: every combination we build will succeed only where both partners are respected. But before functions can relate to each other, we need two skills sharpened to a fine edge: reading any function from any representation, and measuring how fast it changes.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>State the domain of \(f(x) = \dfrac{\sqrt{x - 2}}{x - 5}\), and name which part of the formula posts each restriction.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Two guards from two familiar families. The even-index radical demands \(x - 2 \geq 0\), so \(x \geq 2\). The denominator demands \(x - 5 \neq 0\), so \(x \neq 5\). Both must be satisfied at once.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Domain \([2, 5) \cup (5, \infty)\). This is Unit 3's <strong>domain of honesty</strong> doing its standing work: the formula tells you exactly where it is willing to perform, and everything in this unit &mdash; every rate, every combination &mdash; will be computed only on ground where the function actually stands.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Compute the average rate of change of \(f(x) = x^2 - 3x\) on the interval \([2, 5]\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Evaluate at both endpoints first, then divide the changes:</p>
+    <p style="text-align: center;">\(f(5) = 25 - 15 = 10, \qquad f(2) = 4 - 6 = -2\)</p>
+    <p style="text-align: center;">\(\dfrac{\Delta y}{\Delta x} = \dfrac{f(5) - f(2)}{5 - 2} = \dfrac{10 - (-2)}{3} = \dfrac{12}{3} = 4\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The average rate of change is \(4\) &mdash; output units per input unit. Geometrically, you have computed the slope of the line through the two points \((2, -2)\) and \((5, 10)\) on the curve. Keep the subtraction <em>in the same order</em> top and bottom: \(f(5) - f(2)\) over \(5 - 2\), never mixed.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>A cup of coffee cools on a desk. The table records its temperature:</p>
+    <p style="text-align: center;">\(\begin{array}{c|c|c|c|c} t \text{ (min)} & 0 & 5 & 10 & 20 \\ \hline T \text{ (}^\circ\text{F)} & 190 & 160 & 137 & 110 \end{array}\)</p>
+    <p>Compute the average rate of change on \([0, 10]\) and on \([10, 20]\), and interpret both.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">On \([0, 10]\): \(\dfrac{137 - 190}{10 - 0} = \dfrac{-53}{10} = -5.3\ ^\circ\text{F per minute}\)</p>
+    <p style="text-align: center;">On \([10, 20]\): \(\dfrac{110 - 137}{20 - 10} = \dfrac{-27}{10} = -2.7\ ^\circ\text{F per minute}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The coffee loses heat at an average of \(5.3\ ^\circ\)F per minute over the first ten minutes, but only \(2.7\ ^\circ\)F per minute over the next ten: <strong>cooling slows as the coffee approaches room temperature</strong>. Notice everything a table demands of you: the units come from the labels (degrees per minute, because output is \(^\circ\)F and input is minutes), and the negative sign is information, not decoration &mdash; it reports the direction of change. An average rate of change without units, in a context that has them, is an unfinished answer.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A graph of a function \(g\) passes through the points \((-1, 4)\) and \((3, -2)\). Find the average rate of change of \(g\) on \([-1, 3]\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(\dfrac{g(3) - g(-1)}{3 - (-1)} = \dfrac{-2 - 4}{4} = \dfrac{-6}{4} = -\dfrac{3}{2}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(-\dfrac{3}{2}\). From a graph, the recipe is: read the two points, then slope. Draw the line segment connecting them and you can <em>see</em> the answer &mdash; a line tilting down 3 for every 2 across. Formula, table, graph: three representations, one computation, every time.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>One Computation, Three Disguises</strong></h4>
+        <p>The <strong>average rate of change</strong> of \(f\) on \([a, b]\) is</p>
+        <p style="text-align: center;">\(\dfrac{\Delta y}{\Delta x} = \dfrac{f(b) - f(a)}{b - a}\)</p>
+        <ul>
+            <li><strong>From a formula:</strong> evaluate \(f\) at both endpoints, then divide the changes.</li>
+            <li><strong>From a table:</strong> read the two rows, then divide the changes &mdash; and take your units from the column labels.</li>
+            <li><strong>From a graph:</strong> read the two points, then compute the slope of the line through them.</li>
+        </ul>
+        <p style="margin-bottom: 0;">It is always the slope of the line joining two points of the curve &mdash; which is why a <strong>linear</strong> function is precisely the function whose average rate of change is the same on every interval: for \(f(x) = mx + b\), the computation returns \(m\) no matter which \(a\) and \(b\) you pick. For every other function in your collection, the answer <em>depends on the interval</em> &mdash; and that dependence is the whole story of this week.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Compute the average rate of change of \(f(x) = 2^x\) on \([0, 2]\), \([2, 4]\), and \([4, 6]\). What pattern appears?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">On \([0, 2]\): \(\dfrac{4 - 1}{2} = 1.5 \qquad\) On \([2, 4]\): \(\dfrac{16 - 4}{2} = 6 \qquad\) On \([4, 6]\): \(\dfrac{64 - 16}{2} = 24\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Each average rate of change is <strong>four times</strong> the one before &mdash; exactly the factor by which \(2^x\) itself grows over each two-step interval. An exponential function's <em>speed</em> grows in the same proportion as the function: the bigger it is, the faster it gets bigger. You met this behavior in Unit 3 as the signature of exponential growth; now you can state it as a fact about rates. Hold that thought for the Excel table below &mdash; it is about to become something you can see.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: The Slope Between Two Points on a Curve</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">6 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), rebuild Example 2 so the picture and the number agree:</p>
+        <ol>
+            <li>Graph <strong>f(x) = x^2 - 3x</strong>.</li>
+            <li>Plot the two endpoint points by typing <strong>(2, f(2))</strong> and <strong>(5, f(5))</strong> &mdash; Desmos evaluates the function for you and pins both points to the curve.</li>
+            <li>Type <strong>m = (f(5) - f(2)) / (5 - 2)</strong>. Desmos reports \(m = 4\) &mdash; your Example 2 answer, computed by the same arithmetic you did by hand.</li>
+            <li>Now draw the line through the points: <strong>y = f(2) + m(x - 2)</strong>. It cuts straight through the parabola's two pinned points &mdash; the average rate of change, visible as a tilt.</li>
+            <li>Edit the \(5\)s to \(3\)s and watch both the line and \(m\) change: same function, different interval, different answer. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128202; In Excel: A Rate-of-Change Machine</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>Open a blank Excel workbook from your school Microsoft account and build a table that computes average rates of change for you:</p>
+        <ol>
+            <li>Column A: inputs. Put <strong>0</strong> in A2, <strong>=A2+1</strong> in A3, and fill down to \(x = 10\).</li>
+            <li>Column B: outputs. In B2 type <strong>=A2^2</strong> and fill down &mdash; the squaring function, tabulated.</li>
+            <li>Column C: rates. In C3 type <strong>=(B3-B2)/(A3-A2)</strong> &mdash; the average rate of change over each one-step interval &mdash; and fill down.</li>
+        </ol>
+        <p>Read column C: <strong>1, 3, 5, 7, 9, &hellip;</strong> &mdash; the odd numbers, marching in order. The squaring function's rate climbs by exactly 2 with every step. Now change B2 to <strong>=2^A2</strong> and fill down again. Column C now reads <strong>1, 2, 4, 8, 16, &hellip;</strong> &mdash; look closely: <em>the rate column has reproduced the function itself, one row early.</em> The speed of \(2^x\) is a copy of \(2^x\). No other kind of function does this, and the mystery of a function whose rate of change is itself leads directly to the number \(e\) you met in Unit 3 &mdash; and to a course you have not taken yet.</p>
+        <p style="margin-bottom: 0; font-size: 15px; color: #3c8c4c;"><em>M365 Skill You're Practicing: entering data and using basic formulas with fill-down (Excel). Nothing to submit &mdash; this table is yours to keep and reuse on this week's practice sets.</em></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Find the average rate of change of \(f(x) = x^2 + 2x\) on \([1, 4]\). Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(f(4) = 16 + 8 = 24\) and \(f(1) = 1 + 2 = 3\), so \(\dfrac{f(4) - f(1)}{4 - 1} = \dfrac{24 - 3}{3} = \dfrac{21}{3} = 7\). The line through \((1, 3)\) and \((4, 24)\) has slope 7.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A function \(g\) has domain \([0, \infty)\) on its graph, but its table only shows inputs 1 through 6, and its formula is \(g(x) = \sqrt{x}\). Which representation told the whole truth about the domain &mdash; and what did each of the others hide or suggest?</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            The formula tells the whole truth: \(\sqrt{x}\) demands \(x \geq 0\), so the domain is exactly \([0, \infty)\). The graph <em>shows</em> the same thing but only as far as the viewing window extends &mdash; you must trust the pattern to continue. The table is the least honest witness: it reports six inputs and stays silent about all others; a table shows samples, never the domain. When representations disagree in what they reveal, the formula is the deed of ownership; graph and table are photographs of the property.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Mismatching the order of subtraction: computing \(\dfrac{f(b) - f(a)}{a - b}\), with the outputs in one order and the inputs in the other. The result has the <strong>wrong sign</strong> &mdash; a cooling coffee reported as warming, a falling stone reported as rising. Choose an order and keep it in both numerator and denominator: <em>second point minus first point, upstairs and down.</em> The sign of an average rate of change is not cosmetic; it is the direction of the change, and in context it is often the most important part of the answer.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Leibniz named the <em>function</em> in the 1690s, but the familiar notation \(f(x)\) is younger than the calculus itself: Leonhard Euler introduced it in a paper written in 1734. For four decades, mathematicians did calculus on functions they had no compact way to write. Notation is not decoration &mdash; a good symbol is a thought made portable, and \(f(x)\) made the function a thing you could hold, rename, and &mdash; as you will see all this unit &mdash; combine with other functions like a number.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Today re-sharpened two old blades. Domain and range answer <em>where a function performs</em>, and the formula is the final authority on it &mdash; the domain of honesty, still on duty in a new unit. The average rate of change answers <em>how fast the performance moves</em>, and it is one computation wearing three disguises: the slope of the line through two points of the curve, whether those points come from a formula, a table, or a graph. You saw that only linear functions keep one speed forever, that a parabola's rate climbs through the odd numbers, and that an exponential's rate is a copy of itself &mdash; a fact strange enough that Excel had to show it to you twice. But everything today measured change between <em>two</em> points, and the interval was always specific: \([2,5]\), \([0,10]\), somewhere in particular. Tomorrow we ask the more ambitious question: can one piece of algebra compute the average rate of change over <em>every</em> interval at once? It can. It is called the <strong>difference quotient</strong>, it is four moves of pure algebra, and it is the doorstep of the calculus.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Formula, graph, table: what does each representation reveal honestly about a function's domain, and what does each one hide?</p>
+    <p>2. The average rate of change is &ldquo;one computation in three disguises.&rdquo; What is the one computation, and why is it always a slope?</p>
+    <p>3. Why is a linear function the <em>only</em> kind whose average rate of change ignores the interval &mdash; and what does a changing rate tell you about a graph's shape?</p>
+    <p>4. The Excel rate column for \(2^x\) reproduced the function itself. What might it mean for a function to be its own rate of change &mdash; and which number from Unit 3 is hiding in that question?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">4-1 &middot; Functions and Rates of Change Revisited</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-2</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-2</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-2</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Graphs of Exponential Functions</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to graph the parent functions \(b^x\) for \(b &gt; 1\) and \(0 &lt; b &lt; 1\) from three anchor points.</p></li>
+        <li><p>I will be able to apply shifts, stretches, and reflections to exponential graphs and track every feature through the transformation.</p></li>
+        <li><p>I will be able to identify the horizontal asymptote, intercepts, domain, and range of a transformed exponential function.</p></li>
+        <li><p>I will be able to write the equation of an exponential function from its graph.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Horizontal asymptote</strong>: A horizontal line \(y = d\) that a graph approaches ever more closely without reaching. In Unit 2 you met it at the far ends of rational functions; <em>every</em> exponential function carries one, on one side.</p>
+    <p><strong>Parent function</strong>: The simplest member of a family &mdash; here \(f(x) = b^x\) &mdash; from which every relative is built by transformation.</p>
+    <p><strong>Reflection</strong>: A mirror flip of a graph &mdash; across the \(x\)-axis when the output is negated, across the \(y\)-axis when the input is.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Before drawing a single graph, notice something strange that no other family you have studied can do. Take \(f(x) = 2^x\) and slide it one unit <em>left</em>: you get \(2^{x+1}\). But the exponent rule says \(2^{x+1} = 2 \cdot 2^x\) &mdash; which is the original graph stretched <em>vertically</em> by 2. For this family, <strong>sliding is stretching</strong>: shift the curve sideways and you cannot tell it apart from magnifying it. A parabola moved left is visibly a moved parabola; an exponential moved left is indistinguishable from an exponential enlarged. The curve looks the same at every scale, as if it had no preferred size at all &mdash; a hint of why nature, which grows by proportion rather than by fixed amounts, keeps drawing this shape. Hold onto that wonder; today we learn to draw the shape it belongs to.</p>
+    <p>Every graph in this family is built from three honest points. Since \(b^{-1} = \frac{1}{b}\), \(b^0 = 1\), and \(b^1 = b\), the parent \(f(x) = b^x\) always passes through</p>
+    <p style="text-align: center;">\(\left(-1, \tfrac{1}{b}\right), \qquad (0, 1), \qquad (1, b)\)</p>
+    <p>and on the far side &mdash; the left for growth, the right for decay &mdash; the outputs shrink toward 0 without ever arriving: \(2^{-10} = \frac{1}{1024}\), \(2^{-20} = \frac{1}{1048576}\), smaller and smaller, never zero, because a power of a positive number is always positive. The \(x\)-axis, \(y = 0\), is the parent's <strong>horizontal asymptote</strong>.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Parent Graphs \(y = b^x\)</strong></h4>
+        <ul>
+            <li><strong>Anchor points (every parent):</strong> \(\left(-1, \frac{1}{b}\right)\), \((0, 1)\), \((1, b)\).</li>
+            <li><strong>Growth (\(b &gt; 1\)):</strong> increasing everywhere; hugs \(y = 0\) on the left, climbs without bound on the right.</li>
+            <li><strong>Decay (\(0 &lt; b &lt; 1\)):</strong> decreasing everywhere; climbs without bound on the left, hugs \(y = 0\) on the right.</li>
+            <li><strong>Domain</strong> \((-\infty, \infty)\); <strong>range</strong> \((0, \infty)\); <strong>asymptote</strong> \(y = 0\); no \(x\)-intercept &mdash; the parent never touches its asymptote.</li>
+        </ul>
+        <p style="margin-bottom: 0;">One smooth stroke, one guide line, three plotted points: that is a complete parent graph. Everything else in the family is a transformation of it.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Graph \(f(x) = 2^x\) and \(g(x) = \left(\frac{1}{2}\right)^x\) on the same axes, with anchors, and describe how the two graphs are related.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Anchors for \(f\): \(\left(-1, \frac{1}{2}\right)\), \((0, 1)\), \((1, 2)\) &mdash; rising left to right, hugging \(y = 0\) on the left. Anchors for \(g\): \((-1, 2)\), \((0, 1)\), \((1, \frac{1}{2})\) &mdash; falling left to right, hugging \(y = 0\) on the right. Plot each triple, dash the shared asymptote \(y = 0\), and sweep the curves.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The two graphs are mirror images across the \(y\)-axis &mdash; each anchor of \(f\) is an anchor of \(g\) with its input negated. This is no accident of the picture: \(\left(\frac{1}{2}\right)^x = (2^{-1})^x = 2^{-x}\), and replacing \(x\) with \(-x\) is precisely the algebra of a \(y\)-axis reflection. Growth and decay with reciprocal bases are one curve, viewed in a mirror.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Graph \(f(x) = 2^x - 3\). State the asymptote, domain, range, and both intercepts.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>This is the parent \(2^x\) shifted <strong>down 3</strong>, and everything the parent owns rides along: the anchors drop to \(\left(-1, -\frac{5}{2}\right)\), \((0, -2)\), \((1, -1)\), and the asymptote \(y = 0\) drops to \(y = -3\). The range drops with it: outputs now fill \((-3, \infty)\), not \((0, \infty)\).</p>
+    <p>Intercepts: the \(y\)-intercept is the anchor \((0, -2)\). And unlike the parent, this graph <em>does</em> cross the \(x\)-axis &mdash; the shift dragged the curve across it. The crossing solves \(2^x = 3\). Trap the solution: \(f(1) = -1 &lt; 0\) and \(f(2) = 1 &gt; 0\), so the intercept lies <strong>between \(x = 1\) and \(x = 2\)</strong> (a calculator refines it to about 1.585).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Asymptote \(y = -3\); domain \((-\infty, \infty)\); range \((-3, \infty)\); \(y\)-intercept \((0, -2)\); \(x\)-intercept where \(2^x = 3\), between 1 and 2 (\(\approx 1.585\)). Notice what we could not do: solve \(2^x = 3\) <em>exactly</em>. The unknown is locked in the exponent, and no algebra you own yet can bring it down. The exact language for that answer arrives next week &mdash; today, honest trapping is the standard.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Graph \(g(x) = -3(2)^{x-1} + 4\): name the transformations in order, find three plotted points, and state the asymptote, range, and intercept behavior.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Read the formula as a recipe on the parent \(2^x\): shift <strong>right 1</strong> (the \(x - 1\)), stretch <strong>vertically by 3</strong> and reflect <strong>across the \(x\)-axis</strong> (the \(-3\)), then shift <strong>up 4</strong> (the \(+4\)). Only that final vertical shift moves the asymptote: \(y = 0\) becomes \(y = 4\). The reflection flips the graph <em>below</em> its guide line, so the range is \((-\infty, 4)\).</p>
+    <p>Compute three points, arithmetic in the open:</p>
+    <p style="text-align: center;">\(g(0) = -3 \cdot 2^{-1} + 4 = -\tfrac{3}{2} + 4 = \tfrac{5}{2}, \qquad g(1) = -3 \cdot 2^{0} + 4 = 1, \qquad g(2) = -3 \cdot 2^{1} + 4 = -2\)</p>
+    <p>The curve falls from just under 4 (far left), through \(\left(0, \frac{5}{2}\right)\), \((1, 1)\), \((2, -2)\), and plunges. Since \(g(1) = 1 &gt; 0\) and \(g(2) = -2 &lt; 0\), the \(x\)-intercept is trapped between 1 and 2.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Asymptote \(y = 4\); range \((-\infty, 4)\); decreasing everywhere; \(y\)-intercept \(\left(0, \frac{5}{2}\right)\); \(x\)-intercept between 1 and 2. Every claim came from the recipe plus three honest evaluations &mdash; that is a complete hand graph.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Reporting the range as \((0, \infty)\) out of habit after a vertical shift. The parent's range is \((0, \infty)\) only because its asymptote is \(y = 0\); shift the graph down 3 and the range is \((-3, \infty)\), reflect it below a guide line at 4 and the range is \((-\infty, 4)\). <strong>The asymptote moves with the vertical translation \(d\) &mdash; and only with \(d\).</strong> Horizontal shifts slide the curve along its own guide line; stretches and reflections pivot it about that line; none of them move the line. Find the asymptote first, then read the range from which side of it the graph lives on.</div>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A graph has horizontal asymptote \(y = 1\), passes through \((0, 3)\) and \((1, 5)\), and rises from left to right. Write its equation in the form \(f(x) = ab^x + d\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Harvest the features in the right order. The asymptote hands you \(d = 1\). The \(y\)-intercept gives \(a + d = 3\), so \(a = 2\). The remaining point gives</p>
+    <p style="text-align: center;">\(2b + 1 = 5 \quad\Rightarrow\quad b = 2\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(f(x) = 2 \cdot 2^x + 1\). Verify against everything claimed: \(f(0) = 3\) &#10003;, \(f(1) = 5\) &#10003;, and as \(x \to -\infty\), \(2 \cdot 2^x \to 0\) so \(f(x) \to 1\) &#10003;. Reading a graph is the forward process run backward &mdash; and the asymptote is always the first feature to harvest, because it uncovers \(d\) and unlocks the rest.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: The Asymptote Rides with d Alone</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), put the family's whole anatomy on sliders:</p>
+        <ol>
+            <li>Type <strong>y = a &middot; b^(x &minus; c) + d</strong> and click &ldquo;add all sliders.&rdquo; Set the starting values \(a = 1\), \(b = 2\), \(c = 0\), \(d = 0\).</li>
+            <li>Also graph the guide line <strong>y = d</strong> &mdash; Desmos will dash it to your slider automatically. This line is the claim under test.</li>
+            <li>Drag \(d\): curve and guide line travel together &mdash; the asymptote rides with \(d\). Now drag \(c\) hard in both directions: the curve slides along the line, which never budges. Drag \(a\) through negative values: the curve flips to the <em>other side</em> of the line &mdash; which still never budges. Drag \(b\): steeper, shallower; the line is unmoved.</li>
+            <li>Finish with a table: add \(x = -5, -10, -20\) (with \(b = 2\), \(d = 3\), say) and watch the outputs close in on 3 to more and more decimal places without arriving. That creeping agreement <em>is</em> the asymptote, in numbers. The calculator confirms; your algebra convinces: \(b^{x-c} \to 0\) on the far side, leaving \(a \cdot 0 + d = d\).</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Graph \(f(x) = \left(\frac{1}{3}\right)^x + 2\) by hand &mdash; three points, dashed asymptote, domain and range. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Parent \(\left(\frac{1}{3}\right)^x\) (decay) shifted up 2. Points: \((-1, 5)\), \((0, 3)\), \(\left(1, \frac{7}{3}\right)\). Asymptote \(y = 2\) (hugged on the right); domain \((-\infty, \infty)\); range \((2, \infty)\). No \(x\)-intercept &mdash; the whole graph lives above \(y = 2\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A rising graph has asymptote \(y = -4\) and passes through \((0, -1)\) and \((1, 2)\). Write its equation \(ab^x + d\) and verify all three features.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Asymptote first: \(d = -4\). Then \(a - 4 = -1\) gives \(a = 3\), and \(3b - 4 = 2\) gives \(b = 2\). So \(f(x) = 3 \cdot 2^x - 4\). Check: \(f(0) = -1\) &#10003;, \(f(1) = 2\) &#10003;, and \(3 \cdot 2^x \to 0\) leftward so \(f \to -4\) &#10003;.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">How close does an exponential get to its asymptote? At \(x = -50\), the parent \(2^x\) sits about \(8.9 \times 10^{-16}\) above the axis &mdash; less than a quadrillionth of a unit, a gap millions of times thinner than an atom on any drawable graph. Yet the gap is never zero: \(2^x\) is a positive number for <em>every</em> real \(x\). The asymptote is mathematics' most disciplined form of &ldquo;almost&rdquo; &mdash; arbitrarily close, eternally distinct, and the algebra can certify what no pixel could ever show.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The exponential family now has a face: three anchor points, one sweeping stroke, and a horizontal guide line the curve approaches forever &mdash; a line that obeys exactly one control, the vertical shift \(d\), while shifts, stretches, and reflections rearrange the curve around it. You can draw any member by recipe, harvest an equation back off a graph, and trap the intercepts your algebra cannot yet pin exactly. But one question kept surfacing today and refusing to be answered: solving \(2^x = 3\) exactly. And a deeper one waits behind it: among all the bases you drew today &mdash; 2, 3, one-half, one-third &mdash; nature keeps electing one base you have not met, a number nobody chose and everybody finds. Tomorrow you watch it emerge, digit by digit, from the simple act of compounding interest. That is this week's <strong>Focus material</strong> &mdash; come ready to build the table that corners it.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does every exponential graph have a horizontal asymptote, and why does only the vertical shift \(d\) move it?</p>
+    <p>2. What do the three anchor points \(\left(-1, \frac{1}{b}\right)\), \((0,1)\), \((1,b)\) reveal about the base &mdash; and how do transformations carry them?</p>
+    <p>3. How is the mirror relationship between \(y = 2^x\) and \(y = \left(\frac{1}{2}\right)^x\) proved by algebra rather than observed in a picture?</p>
+    <p>4. When an equation like \(2^x = 3\) resists exact solution, what does honest mathematical work look like in the meantime?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-2 &middot; Graphs of Exponential Functions</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

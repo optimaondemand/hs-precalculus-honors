@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-13</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-13</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-13</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Conics and Systems</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to solve systems involving conics both graphically and algebraically, choosing substitution or elimination deliberately rather than by habit.</p></li>
+        <li><p>I will be able to determine <em>and defend</em> the number of intersection points a system has &mdash; using guards, the discriminant, and the geometry of the curves.</p></li>
+        <li><p>I will be able to interpret intersections in context: where an orbit crosses another orbit, and where a path enters and leaves a radar range circle.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Nonlinear system</strong>: A system of equations in which at least one equation is not a line &mdash; today, systems in which one or both equations are conics.</p>
+    <p><strong>Substitution</strong>: The Unit 3 method of solving a variable (or a whole expression such as \(x^2\)) from one equation and installing it in the other. Still the workhorse.</p>
+    <p><strong>Elimination</strong>: Adding or subtracting multiples of the equations so that a variable's terms cancel. With conics, it is often a <em>squared</em> term that gets eliminated.</p>
+    <p><strong>Tangent</strong>: Touching at exactly one point. Algebraically, a tangency is a repeated root &mdash; the moment two intersection points merge into one.</p>
+    <p><strong>Discriminant</strong>: The quantity \(b^2 - 4ac\) under the quadratic formula's radical. Positive, zero, or negative, it <em>counts</em> the real crossings before you find a single one.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Every August, the night sky over Florida streaks with the Perseid meteor shower &mdash; and the reason it arrives on schedule is a system of conics. Comet Swift&ndash;Tuttle rides an immense ellipse around the sun; Earth rides a much smaller, rounder one. The two ellipses <em>cross</em>, and the comet has littered its path with dust. Once a year our planet reaches the intersection point of the two orbits and plows through the debris: the shooting stars are the solution set of a system, arriving punctually because the intersection point does not move. Last week you saw the same idea serve sailors &mdash; a LORAN receiver located a ship at the point where two hyperbolas crossed. Curves that cross are curves that answer questions. Today we learn to find those crossings exactly.</p>
+    <p>The tools are not new. In Unit 3 you built the systems machinery &mdash; substitution and elimination, with graphs as the picture of the solution set &mdash; and solved your first nonlinear systems. That machinery returns today, welcome and unchanged. What is new is the cast of curves it acts on: circles, parabolas, ellipses, and hyperbolas, every one of which you can now write, graph, and read like a native. A <strong>solution of a system</strong> is still exactly what it was in Unit 3: a point that satisfies <em>every</em> equation at once &mdash; a point where the graphs genuinely meet.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>A harbor radar station sits at the origin and detects ships within 5 miles: its range boundary is the circle \(x^2 + y^2 = 25\). A freighter sails the straight course \(y = x + 1\). Where does the freighter cross the range boundary?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The line hands us \(y\) already isolated &mdash; the signal for <strong>substitution</strong>. Install \(y = x + 1\) in the circle:</p>
+    <p style="text-align: center;">\(x^2 + (x+1)^2 = 25\)</p>
+    <p style="text-align: center;">\(2x^2 + 2x + 1 = 25\)</p>
+    <p style="text-align: center;">\(x^2 + x - 12 = 0 \;\;\Rightarrow\;\; (x+4)(x-3) = 0 \;\;\Rightarrow\;\; x = -4 \;\text{or}\; x = 3\)</p>
+    <p>Each \(x\) returns to the <em>line</em> for its partner: \(x = -4\) gives \(y = -3\); \(x = 3\) gives \(y = 4\). Check both points in the <em>circle</em>, because a solution must satisfy every equation: \((-4)^2 + (-3)^2 = 16 + 9 = 25\) &#10003; and \(3^2 + 4^2 = 9 + 16 = 25\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The freighter crosses the boundary at \((-4, -3)\) and \((3, 4)\) &mdash; entering radar coverage at one point and leaving it at the other. Between those crossings, the whole course lies inside the circle; the crossings are precisely where "visible" becomes "not."</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Machinery Returns: Choosing Your Weapon</strong></h4>
+        <p>Unit 3 gave you two methods; the conic family tells you which to draw.</p>
+        <ul>
+            <li><strong>Substitution</strong> when one equation offers a variable (or an expression like \(x^2\)) already isolated or easily isolated &mdash; a line paired with any conic, or a parabola \(y = \ldots\) paired with a circle.</li>
+            <li><strong>Elimination</strong> when both equations carry matching squared terms &mdash; an ellipse and a hyperbola both holding \(x^2\) and \(y^2\) practically beg you to subtract.</li>
+        </ul>
+        <p style="margin-bottom: 0;">And the standing law, unchanged since Unit 3: a solution must satisfy <strong>every</strong> equation in the system. Finish each candidate by checking it in the equation you did <em>not</em> use to produce it &mdash; that check is where impostors are caught.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Solve the system \(x^2 + y^2 = 20\) and \(y = x^2\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The parabola offers \(x^2 = y\) whole &mdash; substitute the <em>expression</em>, not just a variable:</p>
+    <p style="text-align: center;">\(y + y^2 = 20\)</p>
+    <p style="text-align: center;">\(y^2 + y - 20 = 0 \;\;\Rightarrow\;\; (y+5)(y-4) = 0 \;\;\Rightarrow\;\; y = -5 \;\text{or}\; y = 4\)</p>
+    <p><strong>Post the guard before going further.</strong> On the parabola, \(y = x^2 \geq 0\): no point of this curve has a negative height. The candidate \(y = -5\) fails the guard &mdash; it is a ghost of exactly the species you convicted in Unit 3's radical equations, produced by algebra that cannot know the curve's territory. Discard it with a written reason. The survivor \(y = 4\) gives \(x^2 = 4\), so \(x = 2\) <em>or</em> \(x = -2\) &mdash; both roots, always both roots.</p>
+    <p>Check in the circle: \((\pm 2)^2 + 4^2 = 4 + 16 = 20\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((2, 4)\) and \((-2, 4)\). Two curves, two crossings, one ghost turned away at the border. The algebra proposed three values; the geometry seated two points.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Two orbits share a plane: an ellipse \(x^2 + 4y^2 = 25\) and a hyperbola \(x^2 - y^2 = 5\). Find every point the paths share.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Both equations hold \(x^2\) with coefficient 1 &mdash; the signal for <strong>elimination</strong>. Subtract the hyperbola from the ellipse:</p>
+    <p style="text-align: center;">\((x^2 + 4y^2) - (x^2 - y^2) = 25 - 5\)</p>
+    <p style="text-align: center;">\(5y^2 = 20 \;\;\Rightarrow\;\; y^2 = 4 \;\;\Rightarrow\;\; y = 2 \;\text{or}\; y = -2\)</p>
+    <p>Then from the hyperbola, \(x^2 = 5 + y^2 = 5 + 4 = 9\), so \(x = 3\) or \(x = -3\) &mdash; for <em>each</em> value of \(y\). Every sign pairing is a candidate; check one in the ellipse and symmetry certifies the rest: \(3^2 + 4(2)^2 = 9 + 16 = 25\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Four points: \((3, 2)\), \((3, -2)\), \((-3, 2)\), \((-3, -2)\). Both curves are symmetric across both axes, so the crossings arrive in a full choir of four &mdash; and losing even one of them means losing a place where the orbits genuinely meet. When you take a square root inside a system, write <em>both</em> roots or write an error.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>How Many Crossings Are Even Possible?</strong></h4>
+        <p>You can bound the answer before you touch the algebra &mdash; and the bound is your best defense of a count.</p>
+        <ul>
+            <li><strong>A line and a conic meet in at most 2 points.</strong> Substituting a line into a second-degree equation produces a quadratic, and a quadratic has at most two real roots. The discriminant referees: positive &rarr; 2 crossings, zero &rarr; 1 (a tangency, two crossings merged), negative &rarr; 0.</li>
+            <li><strong>Two distinct conics meet in at most 4 points.</strong> Two second-degree equations combine into an equation of degree at most four &mdash; Example 3 seated the full house of four.</li>
+        </ul>
+        <p style="margin-bottom: 0;">So a claimed count of five is impossible, a claimed count of three is rare and special (it needs a tangency), and every count you report should be able to cite either a discriminant or a guard as its witness.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>(a) Show that the course \(y = x + 7\) never enters the range circle \(x^2 + y^2 = 9\). (b) Then find the values of \(c\) for which the course \(y = x + c\) is exactly <em>tangent</em> to the circle \(x^2 + y^2 = 25\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>(a)</strong> Substitute: \(x^2 + (x+7)^2 = 9\), so \(2x^2 + 14x + 49 = 9\), giving \(2x^2 + 14x + 40 = 0\), or \(x^2 + 7x + 20 = 0\). Discriminant: \(7^2 - 4(1)(20) = 49 - 80 = -31 < 0\). No real roots, no crossings &mdash; the ship passes entirely outside detection, and we know it without finding a single point.</p>
+    <p><strong>(b)</strong> Substitute \(y = x + c\) into \(x^2 + y^2 = 25\):</p>
+    <p style="text-align: center;">\(2x^2 + 2cx + (c^2 - 25) = 0\)</p>
+    <p>Tangency is a repeated root &mdash; discriminant zero:</p>
+    <p style="text-align: center;">\((2c)^2 - 4(2)(c^2 - 25) = 4c^2 - 8c^2 + 200 = 200 - 4c^2 = 0 \;\;\Rightarrow\;\; c^2 = 50 \;\;\Rightarrow\;\; c = \pm 5\sqrt{2}\)</p>
+    <p>Geometry corroborates: the line \(y = x + c\) is tangent to a circle of radius 5 exactly when its distance from the center equals 5, and that distance is \(\tfrac{|c|}{\sqrt{2}}\) &mdash; set it equal to 5 and again \(|c| = 5\sqrt{2}\). Two roads, one answer.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> (a) Zero intersections, certified by a negative discriminant. (b) \(c = 5\sqrt{2}\) or \(c = -5\sqrt{2}\) &mdash; the two positions where a 2-crossing course collapses to a single grazing touch. The discriminant is not a formula fragment; it is a <em>census-taker</em>.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Count Before You Compute</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), put Examples 1 and 4 under the lights:</p>
+        <ol>
+            <li>Graph <strong>x^2 + y^2 = 25</strong> and <strong>y = x + 1</strong>. Click each intersection: \((-4,-3)\) and \((3,4)\), exactly as the algebra ruled.</li>
+            <li>Now replace the line with <strong>y = x + c</strong> and add a slider for \(c\). Drag it upward and watch the census change live: two crossings, then &mdash; at one perfect instant &mdash; a single grazing touch, then none.</li>
+            <li>Park the slider where the touch happens and read the value: \(c \approx 7.071\). Your algebra said \(5\sqrt{2}\); compute it &mdash; \(5\sqrt{2} \approx 7.0711\). The slider found the tangency by eye; the discriminant found it <em>exactly</em>.</li>
+            <li>Finally graph Example 3's pair &mdash; <strong>x^2 + 4y^2 = 25</strong> and <strong>x^2 - y^2 = 5</strong> &mdash; and count the four crossings on screen. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE PHANTOM CROSSINGS</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student asked an AI how many points the circle \(x^2 + y^2 = 6\) and the parabola \(y = x^2\) share. It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;Substituting gives y&sup2; + y &minus; 6 = 0, so (y + 3)(y &minus; 2) = 0, giving y = 2 and y = &minus;3. For y = 2, x = &plusmn;&radic;2; for y = &minus;3, x = &plusmn;i&radic;3. <strong>The curves intersect at four points.</strong>&rdquo;</p>
+            <p>Audit it. The factoring is flawless, and \(x = \pm i\sqrt{3}\) really does satisfy both equations &mdash; as algebra. But an intersection point is a point where the <em>graphs</em> meet, and graphs live in the real plane: a point with coordinate \(i\sqrt{3}\) has no address there. The guard \(y = x^2 \geq 0\) had already barred \(y = -3\) from the parabola. The true census: \((\sqrt{2}, 2)\) and \((-\sqrt{2}, 2)\) &mdash; check: \(2 + 4 = 6\) &#10003; &mdash; <strong>two</strong> points, not four.</p>
+            <p style="margin-bottom: 0;">Name the failure precisely: the machine did honest algebra and then <em>miscounted what the algebra was counting</em> &mdash; solutions of equations are not automatically points of graphs. When you defend an intersection count on this week's work and on Thursday's test, say not only how many, but how many <em>real</em>, and produce the guard or discriminant that turned the others away.</p>
+        </div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve the system \(x^2 + y^2 = 13\) and \(y = x - 1\), checking every point in both equations. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Substitute: \(x^2 + (x-1)^2 = 13\) gives \(2x^2 - 2x + 1 = 13\), so \(x^2 - x - 6 = 0\), and \((x-3)(x+2) = 0\): \(x = 3\) or \(x = -2\). From the line: \((3, 2)\) and \((-2, -3)\). Circle check: \(9 + 4 = 13\) &#10003; and \(4 + 9 = 13\) &#10003;. Two crossings, both genuine.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: How many points do the ellipse \(\frac{x^2}{4} + y^2 = 1\) and the line \(y = x + 3\) share? Certify your count with a discriminant.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Substitute and clear fractions: \(x^2 + 4(x+3)^2 = 4\) gives \(5x^2 + 24x + 32 = 0\). Discriminant: \(24^2 - 4(5)(32) = 576 - 640 = -64 < 0\). Zero intersections &mdash; the line passes above the ellipse entirely, and the negative discriminant is the certificate. (Sketch it: the ellipse never rises above \(y = 1\), while the line is already at height 3 when \(x = 0\).)
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Writing \(y^2 = 4\), then \(y = 2\) &mdash; and moving on. Inside a system this does not merely lose a number; it <strong>loses points</strong>: in Example 3 it would silently erase \((3,-2)\) and \((-3,-2)\), reporting two crossings where four exist. Every square root taken inside a system produces two candidates, and every candidate must be paired with every partner value and judged. The symmetric curves of this unit almost always seat their solutions in symmetric sets &mdash; if your answer breaks the symmetry of the picture, the picture is telling you what you dropped.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The GPS receiver in a phone runs a cousin of today's lesson many times a second. Each satellite's signal says "you are at such-and-such distance from me" &mdash; the three-dimensional version of a range circle &mdash; and the receiver's position is the intersection of those spheres, found by solving the system. LORAN located ships at the crossing of two hyperbolas; GPS locates you at the crossing of spheres. Navigation has always been the art of intersecting loci &mdash; only the curves have changed.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The systems machinery of Unit 3 came back today and met the full conic family: substitution when an expression stood ready, elimination when squared terms matched, and &mdash; new muscle on old bones &mdash; a defended <em>count</em>. A line meets a conic at most twice, two conics at most four times, and every count you claim can produce its witness: a discriminant that tallied the crossings, or a guard that turned a phantom away. You watched a tangency emerge on a slider and then pinned it exactly at \(c = 5\sqrt{2}\), and you caught an AI counting complex numbers as places in the plane. Tomorrow the unit turns from where conics <em>cross</em> to what makes them <em>kin</em>: a single number, the eccentricity, that sorts every curve of this unit into one family &mdash; and tells you which member you are holding before you complete a single square.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why can a line never meet an ellipse in three points &mdash; and what does the degree of an equation have to do with the geometry of crossings?</p>
+    <p>2. In Example 2 the algebra produced \(y = -5\) and the curve refused it. How is that refusal the same discipline as the guard-and-judge method you learned for radical equations?</p>
+    <p>3. What exactly does a zero discriminant look like on a graph, and why is it fair to call a tangency "two intersections standing in the same place"?</p>
+    <p>4. The Perseids return every August; a GPS fix updates every second. What do both owe to the fact that the intersection of two fixed curves is itself fixed?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-13 &middot; Conics and Systems</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-15</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-15</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-15</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Systems in Context (Unit Synthesis)</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to translate an intersection question from the world &mdash; equilibrium, break-even, passing trajectories, catch-up &mdash; into a system of equations.</p></li>
+        <li><p>I will be able to choose the right solving tool for the families in the system: elimination for shared terms, substitution with guards for radicals, logarithms for exponentials.</p></li>
+        <li><p>I will be able to interpret each solution in context, with units, and judge every candidate against the model's domain of honesty before reporting it.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Demand curve</strong>: The price buyers will pay as a function of quantity &mdash; falling, because plenty cheapens. <strong>Supply curve</strong>: the price sellers require as a function of quantity &mdash; rising, because scarcity of effort costs.</p>
+    <p><strong>Equilibrium point</strong>: The intersection of supply and demand &mdash; the one quantity and price at which buyers and sellers agree, so the market clears with neither shortage nor surplus.</p>
+    <p><strong>Break-even point</strong>: The intersection of cost and revenue &mdash; the output at which a venture stops losing money and starts making it.</p>
+    <p><strong>Catch-up time</strong>: The moment two growing (or shrinking) quantities are equal &mdash; the intersection of two models of change, found where their equations are set face to face.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>In 1890 the economist Alfred Marshall drew two curves crossing &mdash; supply rising, demand falling &mdash; and gave economics its most famous picture. Asked whether it is really <em>demand</em> (what buyers want) or <em>supply</em> (what production costs) that sets a price, Marshall refused the question: you might as well ask, he said, whether it is the upper or the under blade of a pair of scissors that cuts the paper. It takes both blades, and the cut happens where they meet. That is a system of equations wearing a waistcoat. Today, in the closing lesson of this unit, every function family you have gathered &mdash; the lines and polynomials of the fall, the exponentials, logarithms, radicals, and piecewise laws of the last four weeks &mdash; walks onto the same plane, and we ask of each pair the scissors question: <strong>where do they meet, and what does the meeting mean?</strong> This is also where Napier's four-hundred-year-old gift gets its payoff: some of today's meetings simply cannot be found without a logarithm.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>A farmers' market prices honey by the jar. Market research gives the demand curve \(p = 120 - 2q\) and the supply curve \(p = 30 + 4q\), where \(q\) is jars per week and \(p\) is dollars... per jar in cents of attention &mdash; dollars. Find the equilibrium and interpret it.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Both expressions equal the same price \(p\), so set them face to face:</p>
+    <p style="text-align: center;">\(120 - 2q = 30 + 4q\)</p>
+    <p style="text-align: center;">\(90 = 6q \;\;\Rightarrow\;\; q = 15, \qquad p = 120 - 2(15) = 90\)</p>
+    <p><strong>Verify in the supply curve:</strong> \(30 + 4(15) = 90\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Equilibrium at \((15, 90)\): <strong>15 jars per week at \$90 per jar</strong> (evidently remarkable honey). The interpretation is the point: price the honey above \$90 and sellers offer more jars than buyers take &mdash; surplus; price below \$90 and buyers want more than sellers bring &mdash; shortage. Only at the intersection do the two blades of the scissors agree. An intersection in context is never just a point; it is a <em>sentence</em> about the world, and you must write it.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Now a market with a curved blade. Suppose supply follows a radical law, \(p = 2\sqrt{q}\) (early jars are cheap to add; later jars strain the hives), while demand is linear: \(p = 15 - q\). Find the equilibrium &mdash; with full discipline.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Set the prices equal: \(2\sqrt{q} = 15 - q\). A radical equation &mdash; so Lesson 3-10's discipline reports for duty. Substitute \(u = \sqrt{q}\), <strong>with its guard posted: \(u \geq 0\)</strong>. Then \(q = u^2\):</p>
+    <p style="text-align: center;">\(2u = 15 - u^2\)</p>
+    <p style="text-align: center;">\(u^2 + 2u - 15 = 0 \;\;\Rightarrow\;\; (u + 5)(u - 3) = 0 \;\;\Rightarrow\;\; u = 3 \;\text{ or }\; u = -5\)</p>
+    <p><strong>Judge:</strong> \(u = -5\) violates the guard \(u = \sqrt{q} \geq 0\) &mdash; rejected, and doubly so: it is both algebraically impossible (no square root is negative) and economically meaningless. \(u = 3\) gives \(q = 9\), and \(p = 2\sqrt{9} = 6\).</p>
+    <p><strong>Verify in the demand curve:</strong> \(15 - 9 = 6\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Equilibrium at <strong>9 jars per week, \$6 per jar</strong>. Notice what happened: a context problem walked in, and inside it was a radical equation with a ghost candidate &mdash; the same ghost, the same guard, the same judgment as two weeks ago. <strong>Context changes the costume, never the discipline.</strong></p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Two fireworks shells are fired vertically. The first launches from the ground: \(h_1(t) = -16t^2 + 64t\). The second launches one second's rig away on a 40-foot platform: \(h_2(t) = -16t^2 + 48t + 40\) (heights in feet, \(t\) in seconds). When are the shells at the same height, and how high is that?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Set the heights equal &mdash; and watch the structure before you compute. Both models carry the identical gravity term \(-16t^2\), so elimination annihilates it:</p>
+    <p style="text-align: center;">\(-16t^2 + 64t = -16t^2 + 48t + 40\)</p>
+    <p style="text-align: center;">\(64t = 48t + 40\)</p>
+    <p style="text-align: center;">\(16t = 40 \;\;\Rightarrow\;\; t = 2.5\)</p>
+    <p>Height at that moment: \(h_1(2.5) = -16(6.25) + 64(2.5) = -100 + 160 = 60\).</p>
+    <p><strong>Verify in the second model:</strong> \(h_2(2.5) = -100 + 120 + 40 = 60\) &#10003;. <strong>Judge against reality:</strong> is \(t = 2.5\) inside both flights? \(h_1\) is airborne until \(t = 4\); \(h_2\) until \(t \approx 5.4\). Both aloft &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The shells pass at the same height <strong>60 feet, at \(t = 2.5\) seconds</strong>. The honors observation: two parabolas met in only <em>one</em> point, because gravity pulls both with the same \(-16t^2\) &mdash; their difference is a straight line, and a line crosses zero once. When two models share a term, the shared term is not information about their <em>difference</em>; elimination knows this before you do.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A catch-up problem that only a logarithm can finish. Rivertown has 5{,}000 residents and grows 8% per year; Lakeside has 8{,}000 residents and grows 2% per year. When are the towns the same size, and how big are they then?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Models: \(R(t) = 5000(1.08)^t\) and \(L(t) = 8000(1.02)^t\). Set them equal and herd the exponentials to one side:</p>
+    <p style="text-align: center;">\(5000(1.08)^t = 8000(1.02)^t\)</p>
+    <p style="text-align: center;">\(\left(\dfrac{1.08}{1.02}\right)^{t} = \dfrac{8000}{5000} = \dfrac{8}{5}\)</p>
+    <p>The unknown is captive in the exponent; only the logarithm can free it. Take \(\ln\) of both sides and apply the power rule:</p>
+    <p style="text-align: center;">\(t \,\ln\!\left(\dfrac{1.08}{1.02}\right) = \ln\!\left(\dfrac{8}{5}\right)\)</p>
+    <p style="text-align: center;">\(t = \dfrac{\ln(8/5)}{\ln(1.08/1.02)} = \dfrac{0.47000\ldots}{0.05716\ldots} \approx 8.22 \text{ years}\)</p>
+    <p><strong>Verify by computing both populations</strong> at \(t = 8.22\): \(R \approx 5000(1.88) \approx 9{,}414\) and \(L \approx 8000(1.177) \approx 9{,}415\) &mdash; agreement to the rounding digit &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The towns draw level after <strong>about 8.2 years, at roughly 9{,}400 residents each</strong> &mdash; and from that day Rivertown leads forever, because 8% compounds past 2% with no further argument needed. Before 1614, this problem had no exact method &mdash; merchants and astronomers ground through such questions by trial. Napier's logarithm turned it into four lines. That is the wonder this unit has been pointing at all along: an invention of pure thought that hands you the key to every locked exponent, forever.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>One Plane, Every Family: The Synthesis</strong></h4>
+        <p>Step back and see what you now hold. Every family this course has met lives on the same plane, and a system may pair any two of them. The <em>translation</em> is always the same &mdash; two quantities, one moment of agreement, set the expressions face to face. Only the <em>finishing tool</em> changes, and the families themselves tell you which to draw:</p>
+        <ul>
+            <li><strong>Line meets line</strong> (Example 1, break-even): substitution or elimination &mdash; Algebra I, now with interpretation duties.</li>
+            <li><strong>Polynomial meets polynomial</strong> (Example 3): eliminate shared terms first; what remains is simpler than either model.</li>
+            <li><strong>Radical in the system</strong> (Example 2): guard, substitute, square if you must &mdash; and judge every candidate. Ghosts do not respect word problems.</li>
+            <li><strong>Exponential meets exponential</strong> (Example 4): isolate the ratio, then logarithms &mdash; the inverse that unlocks the exponent.</li>
+            <li><strong>Families that refuse exact algebra</strong> (\(2^x = x + 3\), \(\ln x = 5 - x\)): reasoning counts the solutions; Desmos locates them. Honesty requires saying which tool certified what.</li>
+        </ul>
+        <p style="margin-bottom: 0;">And after every solve, two judgments before you report: <strong>units</strong> (an intersection in context is a sentence &mdash; write it) and the <strong>domain of honesty</strong> (negative jars, negative seconds, and populations beyond the model's warrant are rejected even when the arithmetic is flawless).</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Watch an Equilibrium Move</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), build Example 1's market and then shock it:</p>
+        <ol>
+            <li>Using \(x\) for quantity and \(y\) for price, enter demand as <strong>y = 120 - 2x {0 &lt;= x &lt;= 60}</strong> and supply as <strong>y = 30 + 4x {x &gt;= 0}</strong> &mdash; the curly braces restrict each curve to its domain of honesty, exactly as a modeler should.</li>
+            <li>Click the intersection: \((15, 90)\), confirming your algebra.</li>
+            <li>Now make demand adjustable: replace it with <strong>y = a - 2x</strong> and click to create a slider for <strong>a</strong>. Drag \(a\) upward &mdash; a demand surge (honey goes viral) &mdash; and watch the equilibrium point <em>slide up the supply curve</em>: more jars, higher price. Drag \(a\) down and watch the market cool.</li>
+            <li>Say what you saw in one sentence of economics: the equilibrium is not a fixed fact but the moving intersection of two live curves. Then, for Example 3, plot both shell heights with <strong>y = -16x^2 + 64x</strong> and <strong>y = -16x^2 + 48x + 40</strong> and click the single crossing at \((2.5, 60)\). The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE SUPERVISED TUTOR</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">Today your AI works <em>for</em> you &mdash; as a tutor generating practice, under your supervision. Three tasks:</p>
+            <p>&#9312; <strong>Commission practice.</strong> Ask your AI: <em>&ldquo;Write two market-equilibrium problems for a precalculus student: one with a radical supply curve and linear demand, one where two exponentially growing quantities catch up. Use numbers that work out cleanly. Do not show solutions.&rdquo;</em> Solve both by hand, full discipline.</p>
+            <p>&#9313; <strong>Then audit the tutor.</strong> Ask the AI to solve its own radical problem &mdash; and read its work like an examiner. Does it post the guard? Does it judge both candidates from the squared equation? You know from Lesson 3-10's checkpoint that the middle of a method is where AI shines and the edges are where it slips. If it kept a ghost, tell it precisely what it skipped, and watch whether its correction is real or cosmetic.</p>
+            <p style="margin-bottom: 0;">&#9314; <strong>Close the loop.</strong> Ask it to explain <em>why</em> the equilibrium price is the only stable one, then compress its paragraph into one honest sentence of your own. The mathematician supervises the tool: it drafts, you verify; it explains, you decide what is true. That habit &mdash; not any single answer &mdash; is what this strand of the course is training.</p>
+        </div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A print shop's costs are \(C(x) = 450 + 3.5x\) dollars for \(x\) posters; revenue is \(R(x) = 8x\). Find the break-even point and interpret both coordinates. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Set \(450 + 3.5x = 8x\): \(450 = 4.5x\), so \(x = 100\), and \(R(100) = \$800\). Verify: \(C(100) = 450 + 350 = 800\) &#10003;. Break-even at \((100, 800)\): the 100th poster is where the shop stops paying to print and starts printing to profit &mdash; below 100 posters every sale still owes the setup cost; beyond it, each poster clears \(\$4.50\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: An investment of \$1{,}000 grows 10% per year. Exactly when does it reach \$2{,}000? Solve with logarithms, exactly and then as a decimal.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(1000(1.10)^t = 2000 \Rightarrow (1.10)^t = 2 \Rightarrow t = \dfrac{\ln 2}{\ln 1.10} \approx \dfrac{0.6931}{0.0953} \approx 7.27\) years. Verify: \(1.1^{7.27} \approx 2.00\) &#10003;. (The banker's &ldquo;Rule of 72&rdquo; estimates \(72/10 = 7.2\) &mdash; your logarithm just certified the folklore.)
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Reporting the naked number. A student solves Example 1 and writes &ldquo;\(q = 15\)&rdquo; &mdash; and has answered nothing, because the question was about a <em>market</em>. An intersection in context has two coordinates and a meaning: <strong>15 jars per week at \$90 per jar, the only price at which the market clears.</strong> The reverse error is just as common: accepting a solution the world forbids &mdash; a negative time, a negative quantity, the \(u = -5\) of Example 2 &mdash; because the algebra produced it. Every applied answer passes two gates: <em>arithmetic truth</em> (it satisfies both equations) and <em>honest meaning</em> (it lives inside the model's domain of honesty, in units, in a sentence).</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The number \(e\) &mdash; this unit's strange constant &mdash; was first sighted inside a money problem. In 1683 Jacob Bernoulli asked what happens to compound interest as compounding becomes continuous, and found the limit \(2.718\ldots\) waiting there. It was Leonhard Euler who tamed it, named it \(e\) (first in a 1731 letter, then in print in his <em>Mechanica</em> of 1736), and revealed it standing quietly at the center of all growth, decay, and &mdash; as you will one day see in calculus &mdash; nearly everything else. A constant discovered in a bank vault turned out to be a law of nature. If that does not produce wonder, check your pulse.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>This is where Unit 3 closes its circle. Four weeks ago you met exponential growth; then the logarithm that undoes it, the radical with its guards, the piecewise law with its borders &mdash; and this week you compared them all and made them meet. Today's four intersections &mdash; a market clearing, a ghost rejected in context, two shells passing at 60 feet, two towns drawing level by logarithm &mdash; used every discipline the unit taught, which is exactly why <strong>Thursday's slot carries the Unit 3 test</strong>: one sitting, everything from lesson 3-1 to this page, and the same four-part standard your work is always held to. Tonight's <strong>Focus assignment</strong> is the dress rehearsal &mdash; the one set this week your teacher grades for method. And when the test is behind you, notice the door this lesson leaves open. A system asks where two functions <em>meet</em> &mdash; the answer is a point. Unit 4 asks something deeper: how functions <em>relate</em> &mdash; how they combine, how one feeds its output into another, how a function can be undone. You have already seen the first case: the exponential and the logarithm, each reversing the other. Unit 4 makes that mutual courtesy a theory. From meetings between functions to relationships between them &mdash; that is the road from here.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What must be true at an intersection point twice over &mdash; once in the algebra and once in the world &mdash; before it may be reported as an answer?</p>
+    <p>2. Given a system, how do the function families themselves announce which finishing tool to draw &mdash; elimination, guarded substitution, or the logarithm?</p>
+    <p>3. Why can a solution pass every arithmetic check and still be rejected? Who or what has the authority to reject it, and where in Example 2 was that authority exercised twice?</p>
+    <p>4. Systems answer <em>where</em> two functions meet. What questions about how functions relate to one another remain unasked &mdash; and which pair from this unit already hints at the answer?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-15 &middot; Systems in Context (Unit Synthesis)</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

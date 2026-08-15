@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-8</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-8</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-8</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Exponential and Logarithmic Equations</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to solve exponential equations exactly &mdash; by matching bases when possible, and by taking logarithms of both sides when not.</p></li>
+        <li><p>I will be able to solve logarithmic equations by rewriting in exponential form and by the one-to-one property.</p></li>
+        <li><p>I will be able to apply the guard-and-judge discipline to logarithmic equations: post the forbidden list first, and reject every extraneous candidate.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>One-to-one property</strong>: Exponentials and logarithms never repeat an output, so equal outputs force equal inputs: if \(b^m = b^n\) then \(m = n\); if \(\log_b M = \log_b N\) (with \(M, N &gt; 0\)) then \(M = N\).</p>
+    <p><strong>Extraneous solution</strong> <em>(returning from Unit 2 &mdash; same discipline, new equations)</em>: A candidate produced by legal algebra that fails the original equation. In Unit 2 the culprit was a cleared denominator; this week it is a logarithm whose argument goes zero or negative.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>This lesson pays a debt. Back in Lesson 3-3, continuous growth left you holding &ldquo;when&rdquo; questions you could only answer approximately &mdash; <em>when</em> does the account double, <em>when</em> does the culture reach a million &mdash; by zooming a graph or running a table. The promissory note said: wait for logarithms. Today it comes due. A logarithm extracts an exponent; an equation with the variable trapped <em>in</em> an exponent is precisely a request for that extraction. Every tool from this week &mdash; the definition, the graphs, and especially yesterday's three rules &mdash; assembles now into an exact answer machine.</p>
+    <p>Start with the case that needs no new machinery at all: when both sides can wear the <em>same base</em>, the one-to-one property finishes the job. An exponential function never repeats an output &mdash; you saw that in its always-climbing graph &mdash; so \(b^{\text{this}} = b^{\text{that}}\) forces \(\text{this} = \text{that}\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Solve \(2^{3x - 1} = 16\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Both sides speak base 2, since \(16 = 2^4\):</p>
+    <p style="text-align: center;">\(2^{3x-1} = 2^4\)</p>
+    <p style="text-align: center;">\(3x - 1 = 4\) &nbsp;&nbsp;<em>(one-to-one property)</em></p>
+    <p style="text-align: center;">\(x = \dfrac{5}{3}\)</p>
+    <p>Verify: \(3 \cdot \frac{5}{3} - 1 = 4\), and \(2^4 = 16\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x = \dfrac{5}{3}\). One honest rewriting, one appeal to one-to-one, done.</p>
+
+    <p>But 16 was a gift. Solve \(3^x = 20\) and no integer power of 3 comes to the rescue &mdash; 20 is not on base 3's list. This is where the logarithm earns its keep: take the logarithm of <em>both sides</em> &mdash; both sides whole, never term by term &mdash; and let yesterday's power rule pull the variable down out of the exponent.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Solve \(3^x = 20\) exactly, then approximate to three decimal places.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Take the natural log of both sides, then apply the power rule:</p>
+    <p style="text-align: center;">\(\ln(3^x) = \ln 20\)</p>
+    <p style="text-align: center;">\(x \ln 3 = \ln 20\) &nbsp;&nbsp;<em>(power rule &mdash; the exponent steps outside)</em></p>
+    <p style="text-align: center;">\(x = \dfrac{\ln 20}{\ln 3} \approx \dfrac{2.9957}{1.0986} \approx 2.727\)</p>
+    <p>Sanity-check the size: \(3^2 = 9 &lt; 20 &lt; 27 = 3^3\), so an answer between 2 and 3 &mdash; nearer 3 &mdash; is right where it should be. Verify: \(3^{2.727} \approx 20.0\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x = \dfrac{\ln 20}{\ln 3} \approx 2.727\). The exact form is the answer; the decimal is its report. (You may recognize \(\frac{\ln 20}{\ln 3}\) as \(\log_3 20\) by change of base &mdash; the two roads meet.)</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Solve \(5e^{2t} = 60\) exactly, then approximate.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Isolate the exponential first</strong> &mdash; the logarithm should meet \(e^{2t}\) alone:</p>
+    <p style="text-align: center;">\(e^{2t} = 12\)</p>
+    <p style="text-align: center;">\(2t = \ln 12\) &nbsp;&nbsp;<em>(the definition: \(\ln 12\) is the exponent that turns \(e\) into 12)</em></p>
+    <p style="text-align: center;">\(t = \dfrac{\ln 12}{2} \approx \dfrac{2.4849}{2} \approx 1.242\)</p>
+    <p>Verify: \(5e^{2(1.242)} = 5e^{2.484} \approx 5 \cdot 12.0 = 60\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(t = \dfrac{\ln 12}{2} \approx 1.242\). Had you taken logs before dividing by 5, you would face \(\ln(5e^{2t})\) &mdash; legal, but now needing the product rule to untangle. Isolate first; it is the shorter road.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Logarithmic Equations: Guard, Work, Judge</strong></h4>
+        <p>Equations with the variable <em>inside</em> logarithms revive Unit 2's discipline for rational equations, word for word:</p>
+        <ul>
+            <li><strong>Guard &mdash; post the forbidden list FIRST.</strong> Every argument of every logarithm must be positive. Write the conditions before touching the equation; together they fence the only territory where solutions may live.</li>
+            <li><strong>Work &mdash; condense and convert.</strong> Use yesterday's rules to collapse to a single logarithm, then rewrite in exponential form (or, if both sides are single logs of the same base, apply the one-to-one property directly).</li>
+            <li><strong>Judge &mdash; try every candidate against the guard and the original equation.</strong> The converted equation is usually polynomial, and polynomials have no memory of the logarithm's domain. Any candidate outside the fence is extraneous: reject it by name.</li>
+        </ul>
+        <p style="margin-bottom: 0;">Cleared denominators, squared radicals, condensed logarithms &mdash; different operations, same side effect: the new equation is more permissive than the old. The forbidden-list-first habit is the one discipline that covers them all.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Solve \(\log_2 x + \log_2(x - 2) = 3\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>Guard:</em> \(x &gt; 0\) and \(x - 2 &gt; 0\) &mdash; together, \(x &gt; 2\). Posted.</p>
+    <p><em>Work:</em> condense by the product rule, then convert by the definition:</p>
+    <p style="text-align: center;">\(\log_2\big(x(x-2)\big) = 3\)</p>
+    <p style="text-align: center;">\(x(x - 2) = 2^3 = 8\)</p>
+    <p style="text-align: center;">\(x^2 - 2x - 8 = 0\)</p>
+    <p style="text-align: center;">\((x - 4)(x + 2) = 0\)</p>
+    <p style="text-align: center;">\(x = 4 \;\; \text{or} \;\; x = -2\)</p>
+    <p><em>Judge:</em> \(x = 4\) clears the fence (\(4 &gt; 2\)); confirm in the original: \(\log_2 4 + \log_2 2 = 2 + 1 = 3\) &#10003;. But \(x = -2\) is forbidden &mdash; it would ask for \(\log_2(-2)\), which does not exist. Reject it by name: extraneous.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x = 4\). The quadratic honestly produced two candidates; only the guard knew that one of them was a ghost. Where did the ghost come from? The condensed equation \(x(x-2) = 8\) is a plain polynomial with no memory that its parents were logarithms &mdash; it happily accepts \(-2\); the original equation cannot.</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Solve \(\log(x + 4) = \log(2x - 1)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>Guard:</em> \(x + 4 &gt; 0\) and \(2x - 1 &gt; 0\) &mdash; together, \(x &gt; \frac{1}{2}\).</p>
+    <p><em>Work:</em> two single logarithms, same base, equal &mdash; the one-to-one property applies directly:</p>
+    <p style="text-align: center;">\(x + 4 = 2x - 1 \;\; \Rightarrow \;\; x = 5\)</p>
+    <p><em>Judge:</em> \(5 &gt; \frac{1}{2}\) &#10003;, and in the original both sides read \(\log 9\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x = 5\). Even when the algebra is one line, the guard and the judge still take their turns &mdash; the habit is cheap, and the one time it catches a ghost pays for every time it didn't.</p>
+
+    <p>Now the debt from Lesson 3-3, paid in full. An account holds $500 growing continuously at 4% per year: \(A(t) = 500e^{0.04t}\). <em>When does it double?</em> Set \(A(t) = 1000\):</p>
+    <p style="text-align: center;">\(500e^{0.04t} = 1000 \;\; \Rightarrow \;\; e^{0.04t} = 2 \;\; \Rightarrow \;\; 0.04t = \ln 2 \;\; \Rightarrow \;\; t = \dfrac{\ln 2}{0.04} \approx 17.3 \text{ years}\)</p>
+    <p>Not &ldquo;about 17, by the table&rdquo; &mdash; exactly \(\frac{\ln 2}{0.04}\), with the decimal as its report. Every doubling time, half-life, and &ldquo;when&rdquo; question in the sciences resolves by this move; notice too that the answer is \(\ln 2\) divided by the growth rate, which is why doubling times barely care about the starting amount &mdash; the 500 cancelled before the logarithm ever arrived.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: Solving by Intersection</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">12 min</span></h4>
+        <p>Today's flagship calculator skill &mdash; learn it once, use it all year. Any equation is a meeting of two graphs: left side and right side, each a curve, solutions where they cross. At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below):</p>
+        <ol>
+            <li>Enter Example 2 as two functions: <strong>y = 3^x</strong> on one line, <strong>y = 20</strong> on the next. <strong>Click the intersection point</strong> &mdash; Desmos marks it and reports \((2.727, 20)\). The \(x\)-coordinate is your solution, to calculator precision; your \(\frac{\ln 20}{\ln 3}\) is the same number, exact.</li>
+            <li>Do the same for Example 4: <strong>y = log_2(x) + log_2(x - 2)</strong> and <strong>y = 3</strong>. Look closely: the curves cross <strong>once</strong>, at \(x = 4\) &mdash; and nothing whatsoever happens at \(x = -2\). The graph never even visits there; the left side's domain ends at \(x = 2\). The algebra's second candidate was always a ghost, and the picture shows you a world in which it never existed.</li>
+            <li>Verify Example 1 (\(y = 2^{3x-1}\) meets \(y = 16\) at \(x = 1.667 \approx \frac{5}{3}\)), Example 3 (\(y = 5e^{2x}\) meets \(y = 60\) at \(x \approx 1.242\)), and the doubling problem (\(y = 500e^{0.04x}\) meets \(y = 1000\) near \(x \approx 17.3\) &mdash; widen the window to see it).</li>
+            <li>Division of labor, as always: the intersection click gives a decimal and a picture; only the algebra gives \(\frac{\ln 20}{\ln 3}\), \(\frac{\ln 12}{2}\), \(\frac{\ln 2}{0.04}\) &mdash; the exact forms that later mathematics builds on. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve \(5^{2x} = 125\) by matching bases, and verify.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(125 = 5^3\), so \(5^{2x} = 5^3\); one-to-one gives \(2x = 3\), so \(x = \frac{3}{2}\). Verify: \(5^{2 \cdot 3/2} = 5^3 = 125\) &#10003;.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve \(\log_3 x + \log_3(x + 6) = 3\) with the full guard-and-judge discipline. Expect two candidates.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            <em>Guard:</em> \(x &gt; 0\) and \(x + 6 &gt; 0\), so \(x &gt; 0\). <em>Work:</em> \(\log_3\big(x(x+6)\big) = 3\), so \(x(x+6) = 27\), giving \(x^2 + 6x - 27 = 0 = (x+9)(x-3)\): candidates \(x = 3\) and \(x = -9\). <em>Judge:</em> \(x = 3\): \(\log_3 3 + \log_3 9 = 1 + 2 = 3\) &#10003;. \(x = -9\): forbidden &mdash; extraneous, rejected. Answer: \(x = 3\).
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Two ways to lose tonight's equations. <strong>First:</strong> taking the logarithm of a sum term by term. Facing \(2^x + 7 = 20\), the temptation is to write &ldquo;\(\ln(2^x) + \ln 7 = \ln 20\)&rdquo; &mdash; but that is yesterday's impostor, \(\log(a+b) = \log a + \log b\), sneaking back in work clothes. The logarithm acts on each <em>whole side</em>, once: isolate first (\(2^x = 13\)), then take logs. <strong>Second:</strong> skipping the guard on logarithmic equations. The condensed polynomial will happily hand you candidates the original equation cannot accept &mdash; post the forbidden list <em>before</em> the algebra, and judge every candidate against it after. A ghost caught at the guard post costs one line; a ghost that reaches your answer costs the problem.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">When archaeologists date a wooden tool or a bone, they are solving Example 3. Living things hold a known fraction of radioactive carbon-14, which decays exponentially after death with a half-life of about 5,730 years; measure how much remains, set up \(Ae^{kt} = (\text{measured amount})\), and the dig site's age is a logarithm away. The &ldquo;when&rdquo; question you learned to answer exactly today is, quite literally, how we know how old the past is.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The week's arc is complete. Monday defined the logarithm as an exponent; Tuesday drew its portrait in the mirror; Wednesday proved the rules that move it; and today the whole toolkit freed variables from exponents and from inside logarithms &mdash; matching bases where possible, taking logs of whole sides where not, and holding every logarithmic equation to the guard-and-judge discipline that Unit 2's rational equations first taught you. Doubling times and half-lives now have exact answers: the promissory note from Lesson 3-3 is paid. Next week the logarithm goes out into the world &mdash; to the scales that measure earthquakes, acidity, and loudness, where each step up multiplies by ten &mdash; and then two new families, radical and piecewise functions, complete this unit's cast of characters. One reminder before you go: this week's Focus set is <strong>Assignment 3-7</strong> &mdash; the quotient-rule proof and the condensation are the two pages your teacher reads closely. Give them your best hand before the flex day.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. When does matching bases settle an exponential equation, and what exactly does taking the logarithm of both sides accomplish when it cannot?</p>
+    <p>2. Where do extraneous solutions of logarithmic equations come from &mdash; and why does the converted polynomial &ldquo;forget&rdquo; what the original equation knew?</p>
+    <p>3. How is the guard-and-judge discipline for logarithmic equations the same discipline you used on rational equations, and what side effect does it guard against in each case?</p>
+    <p>4. Solving by intersection shows one crossing where the algebra produced two candidates. What does each representation know that the other does not?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-8 &middot; Exponential and Logarithmic Equations</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

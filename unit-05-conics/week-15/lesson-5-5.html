@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-5</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-5</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-5</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Parabolas That Serve: Reflectors and Dishes</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to state and prove the reflective property of the parabola &mdash; every ray parallel to the axis reflects through the focus &mdash; and name the two equal lengths that make the proof work.</p></li>
+        <li><p>I will be able to design parabolic reflectors: given a dish's width and depth, locate its focus; given a focus, determine the dish's dimensions.</p></li>
+        <li><p>I will be able to translate fluently between a reflector's physical description and its equation \(x^2 = 4py\), keeping every measurement honest about what it measures.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Reflective property</strong>: The theorem at the heart of today's lesson: a ray traveling parallel to a parabola's axis of symmetry reflects off the curve and passes through the focus &mdash; and a ray leaving the focus reflects into a beam parallel to the axis. One theorem, two directions, most of the parabola's usefulness.</p>
+    <p><strong>Paraboloid</strong>: The three-dimensional dish formed by spinning a parabola about its axis. Every cross-section through the axis is the same parabola, so everything we prove in two dimensions holds for the real, physical bowl.</p>
+    <p><strong>Focal length</strong>: The distance \(p\) from vertex to focus &mdash; yesterday a label on a diagram, today the single number an engineer must get right.</p>
+    <p><strong>Tangent line</strong>: The line that touches a curve at exactly one point, matching its direction there. Light reflecting off a curve obeys the mirror law <em>with respect to the tangent</em>: angle in equals angle out.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Around 200 BC &mdash; a generation after Apollonius named the parabola &mdash; the Greek geometer Diocles wrote a small treatise called <em>On Burning Mirrors</em>. In it survives the earliest known proof that a parabolic mirror gathers the sun's parallel rays to a single point: the focus, from the Latin for <em>hearth</em>, the place where the fire starts. Legend says Archimedes weaponized the idea at the siege of Syracuse, setting Roman ships alight with an array of mirrors; historians doubt the ships, but the geometry was never in doubt, and the same design still lights the Olympic torch at Olympia today with nothing but sunshine and a curve. Yesterday you graphed parabolas and marked \(p\) on your diagrams. Today \(p\) gets a job. Every satellite dish on every roof, every headlight on tonight's highway, and every radio telescope listening to the sky is a working copy of the theorem you will prove in this lesson &mdash; a piece of geometry that has done twenty-two centuries of quiet service.</p>
+
+    <p>Recall the setup from this week's opening lessons. A vertical parabola with vertex at the origin has equation \(x^2 = 4py\): focus at \((0, p)\), directrix \(y = -p\), and &mdash; this is the definition doing its work &mdash; every point on the curve equidistant from focus and directrix. When an engineer says a dish is &ldquo;8 feet wide and 1 foot deep,&rdquo; they are handing you a point on that curve; your task is to recover \(p\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>A satellite dish is 8 feet wide and 1 foot deep. Where should the receiver be mounted?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Place the vertex at the origin, opening upward: \(x^2 = 4py\). The rim of the dish is 1 foot above the vertex and half the width &mdash; <strong>4 feet</strong>, not 8 &mdash; to either side, so the point \((4, 1)\) lies on the parabola:</p>
+    <p style="text-align: center;">\(4^2 = 4p(1)\)</p>
+    <p style="text-align: center;">\(16 = 4p\)</p>
+    <p style="text-align: center;">\(p = 4\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The receiver belongs at the focus, \(4\) feet above the vertex on the axis of symmetry. Notice the focus sits well <em>above</em> the rim of this shallow dish &mdash; the receiver arm you see jutting out of a real dish is holding the electronics at exactly this point, because the reflective property delivers every incoming signal there and nowhere else.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A headlight's parabolic reflector holds its bulb at the focus, \(1.5\) cm from the vertex. If the reflector is 6 cm deep, how wide is its opening?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Now the design runs in reverse: \(p\) is known, and we solve for the rim. With \(p = 1.5\), the reflector is \(x^2 = 4(1.5)y = 6y\). At the opening, \(y = 6\):</p>
+    <p style="text-align: center;">\(x^2 = 6(6) = 36 \;\;\Rightarrow\;\; x = \pm 6\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The rim runs from \(-6\) to \(6\), so the opening is <strong>12 cm wide</strong>. And notice which direction the theorem is working: the dish in Example 1 <em>receives</em> &mdash; parallel rays in, focus out. The headlight <em>transmits</em> &mdash; focus in, parallel beam out. Same curve, same theorem, run forward and backward.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Dish Is Exactly \(4p\) Wide at Focus Height</strong></h4>
+        <p style="margin-bottom: 0;">Set \(y = p\) in \(x^2 = 4py\): then \(x^2 = 4p^2\), so \(x = \pm 2p\) and the curve is exactly \(4p\) wide at the height of the focus &mdash; the <em>latus rectum</em> from yesterday, now a designer's sanity check. In Example 1, \(4p = 16\) feet is wider than the 8-foot dish, confirming at a glance that the focus floats above the rim. A dish deeper than its focal length swallows its focus; a shallow one holds it out in the open air.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 3</span> &mdash; The Reflector Theorem, Proved</h4>
+    <p>Prove the reflective property: a ray traveling straight down, parallel to the axis of \(x^2 = 4py\), reflects off the curve and passes through the focus \(F(0, p)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Step 1 &mdash; find the tangent without calculus.</strong> Let \(P = \left(a, \tfrac{a^2}{4p}\right)\) be any point on the parabola with \(a \neq 0\). A line through \(P\) with slope \(m\) is \(y = m(x - a) + \tfrac{a^2}{4p}\); substituting into \(x^2 = 4py\) gives</p>
+    <p style="text-align: center;">\(x^2 = 4pm(x - a) + a^2 \;\;\Rightarrow\;\; x^2 - 4pmx + 4pma - a^2 = 0\)</p>
+    <p>The line is tangent exactly when this quadratic has a double root &mdash; discriminant zero:</p>
+    <p style="text-align: center;">\(16p^2m^2 - 4(4pma - a^2) = 4(2pm - a)^2 = 0 \;\;\Rightarrow\;\; m = \frac{a}{2p}\)</p>
+    <p>No calculus required &mdash; the tangent is simply the one line through \(P\) that the parabola refuses to cross twice.</p>
+    <p><strong>Step 2 &mdash; find where the tangent lands.</strong> With slope \(\tfrac{a}{2p}\), the tangent line is \(y = \tfrac{a}{2p}x - \tfrac{a^2}{4p}\); it meets the \(y\)-axis at \(Q = \left(0, -\tfrac{a^2}{4p}\right)\), directly below the vertex.</p>
+    <p><strong>Step 3 &mdash; two equal lengths.</strong> Compute both distances from the focus:</p>
+    <p style="text-align: center;">\(FQ = p - \left(-\frac{a^2}{4p}\right) = p + \frac{a^2}{4p}\)</p>
+    <p style="text-align: center;">\(FP = \text{distance from } P \text{ to the directrix} = \frac{a^2}{4p} + p\)</p>
+    <p>The second line is the parabola's own definition doing the heavy lifting: \(P\) is on the curve, so its distance to \(F\) equals its distance to the directrix \(y = -p\), read straight off the diagram. So \(FP = FQ\), and <strong>triangle \(FPQ\) is isosceles</strong>: the base angles at \(P\) and \(Q\) are equal.</p>
+    <p><strong>Step 4 &mdash; chase the angles.</strong> The incoming ray at \(P\) is vertical; the segment \(QF\) lies along the \(y\)-axis, also vertical &mdash; two parallel lines cut by the tangent. So the angle the incoming ray makes with the tangent at \(P\) equals the angle \(\angle FQP\) at \(Q\) (corresponding angles), which by the isosceles triangle equals \(\angle FPQ\) &mdash; the angle the tangent makes with \(PF\). The ray arrives making the same angle with the tangent that \(PF\) makes on the other side. By the mirror law &mdash; angle in equals angle out across the tangent &mdash; <em>the reflected ray travels along \(PF\)</em>.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Every ray parallel to the axis reflects through the focus. &#8718; &nbsp; The whole proof rests on two equal lengths, \(FP = FQ\) &mdash; and the equality is nothing but the definition of the parabola itself. The curve serves because of what it <em>is</em>.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Why the Focus, and Only the Focus</strong></h4>
+        <p>The proof used an arbitrary point \(P\) &mdash; the letter \(a\) never took a value. That is the theorem's real force: <em>every</em> point of the dish, from center to rim, sends its ray to the same point \(F\). A signal too faint for any single square inch of metal to detect arrives from the whole dish at once, all of it superimposed at the focus.</p>
+        <ul>
+            <li><strong>Receiving</strong> (satellite dish, radio telescope): parallel rays from a distant source &rarr; all reflect to \(F\). The receiver sits at \(F\) and drinks from the entire aperture.</li>
+            <li><strong>Transmitting</strong> (headlight, searchlight, torch mirror): a source at \(F\) &rarr; every ray reflects parallel to the axis. The bulb's scattered light leaves as one disciplined beam.</li>
+        </ul>
+        <p style="margin-bottom: 0;">Move the receiver an inch off the focus and the arriving rays no longer coincide &mdash; they cross at \(F\) and are already spreading apart again. The geometry is exact, so the engineering must be too. This is the unit's virtue made literal: the parabola's service is not approximate goodwill but a theorem, holding at every point, without exception.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A radio telescope's dish measures 300 meters across and 50 meters deep. How high above the vertex does the receiver platform hang?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Vertex at the origin, rim point \((150, 50)\) &mdash; half of 300, and the full depth:</p>
+    <p style="text-align: center;">\(150^2 = 4p(50)\)</p>
+    <p style="text-align: center;">\(22{,}500 = 200p\)</p>
+    <p style="text-align: center;">\(p = 112.5\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The receiver hangs \(112.5\) meters above the vertex &mdash; higher than a 30-story building, suspended over the dish on cables, because the mathematics tolerates no other address. Real instruments of exactly this design have mapped pulsars, timed the spin of Mercury, and listened for signals across the galaxy: a Greek theorem, holding up astronomy.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE APPRENTICE SETS THE PROBLEMS</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">Today the AI works <em>for</em> you &mdash; under supervision. Give your AI tutor this prompt:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;Write two new parabolic-reflector design problems in the style of: <em>a satellite dish is 8 feet wide and 1 foot deep; where is the focus?</em> Use realistic dimensions. Give one problem that asks for the focus from the dimensions, and one that gives the focal length and asks for a dimension. Then show your worked solutions.&rdquo;</p>
+            <p>Now solve both problems yourself, by hand, before reading the AI's solutions &mdash; and then grade the machine. Check its setup first: did it use the <strong>radius</strong> or sneak in the full width? Did it place the known point on the curve correctly? Then check its arithmetic against yours.</p>
+            <p style="margin-bottom: 0;">If it erred, name the exact line and fix it; if it is clean, say so &mdash; an honest audit acquits as well as convicts, as you learned judging radical equations in Unit 3. Either way, you leave with two extra problems solved and a sharper eye. The mathematician supervises the tool; the tool, well-supervised, serves.</p>
+        </div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A dish is 6 feet wide and 9 inches deep. Find the focal length. Work it on paper &mdash; mind your units &mdash; before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Convert first: 9 inches \(= 0.75\) ft. Rim point: \((3, 0.75)\) &mdash; the radius is 3, not 6. Then \(3^2 = 4p(0.75)\) gives \(9 = 3p\), so \(p = 3\) feet. The receiver sits 3 feet above the vertex &mdash; again well above the rim of this shallow dish (check: \(4p = 12 > 6\)).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A searchlight mirror holds its lamp 5 cm from the vertex. Write the mirror's equation, and find how wide the mirror is at the exact height of the lamp.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(p = 5\), so \(x^2 = 20y\). At lamp height \(y = 5\): \(x^2 = 100\), \(x = \pm 10\) &mdash; the mirror is 20 cm wide there. No accident: that is the latus rectum, \(4p = 20\), the green box's sanity check paying off.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Feeding the <strong>full width</strong> into \(x\). A dish &ldquo;8 feet wide&rdquo; puts the point \((4, 1)\) on the curve, not \((8, 1)\) &mdash; the equation measures from the axis outward, so \(x\) is the <em>radius</em> of the rim. Plug in 8 and you compute \(64 = 4p\), \(p = 16\): a focus four times too high, and a receiver mounted in empty air listening to nothing. Width halves before it enters the equation; depth enters whole. Say it before every setup: <em>half the width, all the depth.</em></div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Diocles' <em>On Burning Mirrors</em> was lost to the Greek-reading world for centuries &mdash; the text survived only in a medieval Arabic translation, and was not recovered and published in a modern edition until the 1970s. The proof you worked through today crossed two millennia, three languages, and at least one collapsed civilization to reach your page. Theorems keep better than empires.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The parabola turned out to be more than a shape to graph: it is a machine, and today you proved why the machine works. Two equal lengths &mdash; \(FP = FQ\), handed to us by the curve's own definition &mdash; force every parallel ray through the focus, and that single fact aims satellite dishes, disciplines headlight beams, and suspends receiver platforms hundreds of feet over telescope dishes. The theorem asks nothing and serves everyone; that is the shape of this unit's virtue. Tomorrow the string gains a second pin: a curve defined not by one focus and a line, but by <em>two</em> foci and a fixed sum of distances &mdash; the ellipse, drawn the way gardeners have drawn flowerbeds for centuries, and derived the way honors students derive things: honestly, with every squaring shown. Tomorrow's lesson is also this week's <strong>Focus assignment</strong>, so bring your full derivation discipline.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. The reflector proof turns on two equal lengths. Which two &mdash; and which of them is simply the definition of the parabola in disguise?</p>
+    <p>2. A dish receives and a headlight transmits, yet both are the same theorem. What exactly reverses between the two uses, and what stays fixed?</p>
+    <p>3. Why must the receiver sit <em>exactly</em> at the focus &mdash; what happens, geometrically, to the gathered rays an inch above or below it?</p>
+    <p>4. The proof never assigned a value to \(a\). Why is that generality the whole engineering point &mdash; what would a dish be worth if the theorem held only at some of its points?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-5 &middot; Parabolas That Serve: Reflectors and Dishes</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

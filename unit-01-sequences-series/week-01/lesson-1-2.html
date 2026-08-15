@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 1-2</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 1</div>
+        <div style="font-size: 13px; color: #666;">Sequences and Series</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">1-2</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Sequences and Series</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">1-2</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Recursive Definitions and Factorial Notation</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to write the terms of a sequence defined by a recursive formula, whether it starts from one seed term or two.</p></li>
+        <li><p>I will be able to translate between recursive and explicit definitions of the same sequence and verify that both produce identical terms.</p></li>
+        <li><p>I will be able to evaluate and simplify expressions written in factorial notation, including quotients of factorials.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Recursive formula</strong>: A formula that defines each term of a sequence using one or more of the terms that come before it. It must always state the initial term or terms.</p>
+    <p><strong>Initial term (seed)</strong>: The starting value(s) a recursive formula declares outright, from which every later term grows.</p>
+    <p><strong>Fibonacci sequence</strong>: The sequence \(1, 1, 2, 3, 5, 8, 13, \ldots\), in which each term is the sum of the two preceding terms.</p>
+    <p><strong>Factorial</strong>: For a positive integer \(n\), the product of the integers from \(n\) down to 1, written \(n!\). By definition, \(0! = 1\).</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>In the last lesson we promised you rabbits. In <em>Liber Abaci</em> (1202), Fibonacci posed a puzzle: begin with one newborn pair of rabbits; each month, every pair old enough to breed produces a new pair. How many pairs are there after a year? Counting month by month gives the list</p>
+    <p style="text-align: center;">\(1, \; 1, \; 2, \; 3, \; 5, \; 8, \; 13, \; 21, \; 34, \; \ldots\)</p>
+    <p>Look for an explicit formula the way you learned in Lesson 1-1 and you will hunt a long time &mdash; there is no obvious rule that computes term 9 from the number 9. But say <em>how the list grows</em> and the whole thing collapses into one sentence: <strong>each term is the sum of the two before it.</strong> That is a different kind of rule. Instead of computing a term from its position, it computes a term from its <em>predecessors</em> &mdash; the sequence stands on its own shoulders. Nature seems fond of this kind of growth: the spiral chambers of a nautilus shell, the arrangement of pinecone scales, and the petal counts of many flowers all echo Fibonacci&rsquo;s numbers, because each new stage of growth is built from the stages already there.</p>
+    <p>Rules of this kind are called <em>recursive</em> &mdash; from the Latin <em>recurrere</em>, &ldquo;to run back.&rdquo; To find a term, you run back to the terms before it. This lesson teaches you to read, write, and use recursive definitions &mdash; and then introduces factorial notation, a piece of shorthand that is itself recursive at heart and that you will use for the rest of this course.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Recursive Formulas</strong></h4>
+        <p>A <strong>recursive formula</strong> has two required parts:</p>
+        <ul>
+            <li><strong>The initial term or terms</strong> (the <em>seeds</em>), stated outright: \(a_1 = 5\), or for Fibonacci, \(a_1 = 1\) and \(a_2 = 1\).</li>
+            <li><strong>A rule</strong> defining \(a_n\) from preceding terms: for example, \(a_n = a_{n-1} + a_{n-2}\).</li>
+        </ul>
+        <p>The Fibonacci sequence in full recursive dress:</p>
+        <p style="text-align: center;">\(\Large a_1 = 1, \quad a_2 = 1, \quad a_n = a_{n-1} + a_{n-2} \; \text{ for } n \ge 3\)</p>
+        <p>The seeds are not decoration &mdash; they are half the definition. The rule &ldquo;add the two previous terms&rdquo; with seeds \(2\) and \(1\) produces \(2, 1, 3, 4, 7, 11, \ldots\) (a different famous sequence, the Lucas numbers). Same engine, different starting fuel, different sequence.</p>
+        <p>A rule that reaches back only one term needs only one seed; a rule like Fibonacci&rsquo;s that reaches back two terms needs two.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Write the first five terms of the sequence defined by</p>
+    <p style="text-align: center;">\(\Large a_1 = 5, \quad a_n = 2a_{n-1} - 3\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The first term is handed to us. Every later term feeds on the one before it, so we must work in order &mdash; no skipping ahead:</p>
+    <p style="text-align: center;">\(a_1 = 5\)</p>
+    <p style="text-align: center;">\(a_2 = 2a_1 - 3 = 2(5) - 3 = 7\)</p>
+    <p style="text-align: center;">\(a_3 = 2a_2 - 3 = 2(7) - 3 = 11\)</p>
+    <p style="text-align: center;">\(a_4 = 2a_3 - 3 = 2(11) - 3 = 19\)</p>
+    <p style="text-align: center;">\(a_5 = 2a_4 - 3 = 2(19) - 3 = 35\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The first five terms are \(5, \; 7, \; 11, \; 19, \; 35\).</p>
+    <p>Notice what the recursion costs you: to know \(a_5\) you had to earn \(a_2\), \(a_3\), and \(a_4\) first. There is no leaping to term 50 &mdash; only the patient climb. That is the trade-off between the two kinds of definition, and we will weigh it carefully below.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Write the first six terms of the sequence defined by</p>
+    <p style="text-align: center;">\(\Large a_1 = 1, \quad a_2 = 3, \quad a_n = a_{n-1} + a_{n-2} \; \text{ for } n \ge 3\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Two seeds are given because the rule reaches back two places. Each new term is the sum of the two most recent:</p>
+    <p style="text-align: center;">\(a_1 = 1\)</p>
+    <p style="text-align: center;">\(a_2 = 3\)</p>
+    <p style="text-align: center;">\(a_3 = a_2 + a_1 = 3 + 1 = 4\)</p>
+    <p style="text-align: center;">\(a_4 = a_3 + a_2 = 4 + 3 = 7\)</p>
+    <p style="text-align: center;">\(a_5 = a_4 + a_3 = 7 + 4 = 11\)</p>
+    <p style="text-align: center;">\(a_6 = a_5 + a_4 = 11 + 7 = 18\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The first six terms are \(1, \; 3, \; 4, \; 7, \; 11, \; 18\).</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: Two Languages, One Sequence</strong></h4>
+        <p>Many sequences can be described both ways, and each language has its strength:</p>
+        <table style="border-collapse: collapse; width: 100%;" border="1">
+            <tbody>
+                <tr>
+                    <td style="padding: 8px 12px; width: 50%;"><strong>Explicit</strong> &mdash; \(a_n\) from the position \(n\).<br />Strength: <em>random access</em>. Term 500 is one substitution away.</td>
+                    <td style="padding: 8px 12px; width: 50%;"><strong>Recursive</strong> &mdash; \(a_n\) from preceding terms.<br />Strength: <em>natural description</em>. Growth processes (populations, balances, rabbit pairs) are usually easiest to state as &ldquo;next = rule applied to current.&rdquo;</td>
+                </tr>
+            </tbody>
+        </table>
+        <p style="margin-bottom: 0;">Translating between the two languages is a core skill of this unit. Next week you will see that the two great families of sequences &mdash; arithmetic and geometric &mdash; each speak both languages fluently.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>The sequence defined by \(a_1 = 4\) and \(a_n = a_{n-1} + 3\) adds 3 at every step. Find an explicit formula for the same sequence, and verify that the two definitions agree.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Unroll a few terms to see the structure: \(4, \; 7, \; 10, \; 13, \; \ldots\) By the time we reach \(a_n\), the rule has added 3 exactly \(n - 1\) times to the seed:</p>
+    <p style="text-align: center;">\(a_n = 4 + 3(n-1) = 3n + 1\)</p>
+    <p>Verify against the recursive definition:</p>
+    <p style="text-align: center;">\(a_1 = 3(1) + 1 = 4\) &#10003; (matches the seed)</p>
+    <p style="text-align: center;">\(a_2 = 3(2) + 1 = 7\) &#10003; and \(a_3 = 3(3) + 1 = 10\) &#10003; (each 3 more than the last, as the rule demands)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(a_n = 3n + 1\).</p>
+    <p>The reasoning move &mdash; &ldquo;the rule has acted \(n-1\) times by term \(n\)&rdquo; &mdash; is the bridge between the two languages, and it is worth owning rather than memorizing.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Write a recursive definition for the sequence given explicitly by \(a_n = 5 \cdot 2^{\,n-1}\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>List the first few terms: \(5, \; 10, \; 20, \; 40, \; \ldots\) Each term is double the one before it. The seed is \(a_1 = 5\), and the rule is &ldquo;multiply by 2&rdquo;:</p>
+    <p style="text-align: center;">\(\Large a_1 = 5, \quad a_n = 2a_{n-1}\)</p>
+    <p>Check: the recursion gives \(a_2 = 2(5) = 10\) and the explicit formula gives \(a_2 = 5 \cdot 2^1 = 10\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(a_1 = 5, \; a_n = 2a_{n-1}\).</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128202; Try It in Excel: Teaching a Spreadsheet to Recurse</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">15 min</span></h4>
+        <p>A spreadsheet is a recursion machine: a formula that refers to the cell above it is exactly a rule that refers to \(a_{n-1}\). Open a blank workbook in Excel and build Example 1:</p>
+        <ol>
+            <li>In column A, type <strong>1</strong> in cell A1 and <strong>2</strong> in A2. Select both cells and drag the fill handle (the small square at the corner of the selection) down to A10. Column A now holds the positions \(n\).</li>
+            <li>In cell B1, type the seed: <strong>5</strong>.</li>
+            <li>In cell B2, type the rule: <strong>=2*B1-3</strong> and press Enter.</li>
+            <li>Click B2 and drag its fill handle down to B10. Excel rewrites the rule for each row &mdash; B3 becomes <strong>=2*B2-3</strong>, and so on. Read down the column: \(5, 7, 11, 19, 35, \ldots\) &mdash; your Example 1 terms, computed by the same patient climb you did by hand.</li>
+            <li>Now build Fibonacci with two seeds: type <strong>1</strong> in C1 and <strong>1</strong> in C2, then in C3 type <strong>=C1+C2</strong> and fill down to C10. There are the rabbits.</li>
+        </ol>
+        <p style="margin-bottom: 0;">Try changing a seed &mdash; make C1 equal 2 and C2 equal 1 &mdash; and watch every term downstream change instantly. The spreadsheet makes visible what the definition says: in a recursive sequence, everything grows from the seeds. Nothing to submit here; this tool returns in Lesson 1-4, where you will model real situations with it.</p>
+    </div>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Factorial Notation</strong></h4>
+        <p>Some formulas call for the product of <em>all</em> the positive integers up to \(n\). This happens so often &mdash; especially in counting, probability, and (later) calculus &mdash; that it earned its own symbol. <strong>\(n\) factorial</strong>, written \(n!\), means</p>
+        <p style="text-align: center;">\(\Large n! = n \,(n-1)(n-2) \cdots (2)(1)\)</p>
+        <p>For example, \(4! = 4 \cdot 3 \cdot 2 \cdot 1 = 24\). The definition is recursive at heart: each factorial is built from the one before it,</p>
+        <p style="text-align: center;">\(\Large n! = n \cdot (n-1)!\)</p>
+        <p>with the special case</p>
+        <p style="text-align: center;">\(\Large 0! = 1\)</p>
+        <p>Why must \(0! = 1\)? Apply the recursive rule at \(n = 1\): it says \(1! = 1 \cdot 0!\). Since \(1! = 1\), we are forced to accept \(0! = 1\) &mdash; not as a convenience, but as the only value consistent with the pattern. (It also matches common sense in counting: there is exactly one way to arrange zero objects &mdash; do nothing.)</p>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Factorials grow faster than any exponential &mdash; faster than doubling, faster than tripling, faster than any fixed ratio at all, because the factor you multiply by keeps growing. A deck of 52 cards can be ordered in \(52!\) ways, a number with 68 digits &mdash; more orderings than there are atoms in the Earth. Shuffle a deck honestly and it is nearly certain that its exact order has never occurred before in human history.</div>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Evaluate or simplify each expression. &emsp; &#9312; \(6!\) &emsp; &#9313; \(\dfrac{8!}{6!}\) &emsp; &#9314; \(\dfrac{(n+1)!}{(n-1)!}\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; Multiply down from 6:</p>
+    <p style="text-align: center;">\(6! = 6 \cdot 5 \cdot 4 \cdot 3 \cdot 2 \cdot 1 = 720\)</p>
+    <p>&#9313; Resist the urge to compute both factorials in full. Instead, unwrap \(8!\) just far enough to reveal a copy of \(6!\), then cancel:</p>
+    <p style="text-align: center;">\(\dfrac{8!}{6!} = \dfrac{8 \cdot 7 \cdot 6!}{6!} = 8 \cdot 7 = 56\)</p>
+    <p>&#9314; The same unwrapping works with symbols. Since \((n+1)! = (n+1) \cdot n \cdot (n-1)!\),</p>
+    <p style="text-align: center;">\(\dfrac{(n+1)!}{(n-1)!} = \dfrac{(n+1)\, n \,(n-1)!}{(n-1)!} = n(n+1)\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> &#9312; \(720\) &emsp; &#9313; \(56\) &emsp; &#9314; \(n(n+1)\)</p>
+    <p>The cancellation move in &#9313; and &#9314; is the one you will use constantly: <em>a larger factorial always contains every smaller factorial as a factor.</em> That single fact turns monstrous quotients into small products.</p>
+
+    <h4><span style="color: #f67a0c;">Example 6</span></h4>
+    <p>Write the first five terms of the sequence defined by</p>
+    <p style="text-align: center;">\(\Large a_n = \dfrac{n!}{2^n}\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Substitute and simplify each fraction fully:</p>
+    <p style="text-align: center;">\(a_1 = \dfrac{1!}{2^1} = \dfrac{1}{2}\)</p>
+    <p style="text-align: center;">\(a_2 = \dfrac{2!}{2^2} = \dfrac{2}{4} = \dfrac{1}{2}\)</p>
+    <p style="text-align: center;">\(a_3 = \dfrac{3!}{2^3} = \dfrac{6}{8} = \dfrac{3}{4}\)</p>
+    <p style="text-align: center;">\(a_4 = \dfrac{4!}{2^4} = \dfrac{24}{16} = \dfrac{3}{2}\)</p>
+    <p style="text-align: center;">\(a_5 = \dfrac{5!}{2^5} = \dfrac{120}{32} = \dfrac{15}{4}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The first five terms are \(\dfrac{1}{2}, \; \dfrac{1}{2}, \; \dfrac{3}{4}, \; \dfrac{3}{2}, \; \dfrac{15}{4}\).</p>
+    <p>Watch the story in those terms: the sequence hesitates at first &mdash; the doubling in the denominator holds its own for two terms &mdash; and then the factorial pulls away for good. By \(a_5\) the factorial is winning decisively, exactly as the <em>Did You Know?</em> box predicts it must.</p>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Write the first four terms of \(a_1 = 10, \; a_n = a_{n-1} - 6\). Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(a_1 = 10\), &nbsp; \(a_2 = 10 - 6 = 4\), &nbsp; \(a_3 = 4 - 6 = -2\), &nbsp; \(a_4 = -2 - 6 = -8\). The first four terms are \(10, 4, -2, -8\). (Could you write this one explicitly? The rule acts \(n-1\) times: \(a_n = 10 - 6(n-1) = 16 - 6n\). Check: \(a_3 = 16 - 18 = -2\) &#10003;.)
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Simplify \(\dfrac{9!}{7! \; 2!}\)</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Unwrap \(9!\) far enough to expose \(7!\): &nbsp; \(\dfrac{9!}{7! \; 2!} = \dfrac{9 \cdot 8 \cdot 7!}{7! \cdot 2} = \dfrac{72}{2} = 36\).
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; WHERE AI HELPS &mdash; AND WHERE IT DOESN'T</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Here is a good supervised-tutor exercise: ask an AI to explain <em>why \(0! = 1\)</em>, and then grade its answer against this lesson. A strong explanation appeals to the recursive definition (the rule \(1! = 1 \cdot 0!\) forces it) or to counting (one way to arrange nothing). A weak one just says &ldquo;mathematicians define it that way for convenience&rdquo; &mdash; true, but it dodges the <em>why</em>. An AI can produce either answer depending on how it is asked. Judging which explanation actually explains &mdash; that is the mathematician&rsquo;s job, and this week it is yours.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>A recursive formula defines a sequence the way a climb defines a summit: seeds first, then one rule applied again and again, each term standing on the terms before it. You learned to read both one-seed and two-seed recursions, to translate between recursive and explicit definitions &mdash; checking that both languages tell the same story &mdash; and to wield factorial notation, whose great cancellation trick will serve you from now through calculus. Next lesson, the patient climbing pays off: sequences with a constant step, the arithmetic family, where the two languages meet in their simplest and most useful form.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What must a recursive formula always state, and why does the rule alone fail to determine a sequence?</p>
+    <p>2. When is a recursive description more natural than an explicit one &mdash; and what does the recursive form cost you?</p>
+    <p>3. Why is \(0! = 1\) forced by the definition of factorial rather than chosen for convenience?</p>
+    <p>4. How can you verify that a recursive definition and an explicit formula describe the same sequence?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">1-2 &middot; Recursive Definitions and Factorial Notation</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

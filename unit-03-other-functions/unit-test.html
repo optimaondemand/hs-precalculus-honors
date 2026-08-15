@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Unit 03 Test</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Assessment</div>
+        <div style="font-size: 18px; color: #0e1c42;">Unit 3 Test</div>
+        <div style="font-size: 13px; color: #666;">Covers Lessons 3-1 through 3-15</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Points</div>
+        <div style="font-size: 16px; color: #0e1c42;">Test &middot; Rubric-Graded</div>
+        <div style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 14px; padding: 3px 12px; border-radius: 10px; margin-top: 6px;">40 pts</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">Unit 3 &middot; Other Functions and Their Graphs</div>
+        <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Unit Test: Other Functions and Their Graphs</div>
+        <div style="font-size: 15px; color: #666;">Test &middot; 40 pts &middot; Hand-written, single PDF upload</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128203; BEFORE YOU BEGIN</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <p style="margin-top: 0;">This test gathers the whole four-week arc into one sitting: exponential growth and the strange constancy of \(e\), the logarithm and its hard-won properties, radical functions with their guards and ghosts, piecewise laws and their borders, functions compared across representations, and systems &mdash; where everything met. It has three parts: <strong>Part A</strong> (fluency), <strong>Part B</strong> (reasoning &mdash; write these as arguments), and <strong>Part C</strong> (one synthesis problem reaching back to Unit 2).</p>
+            <p><strong>Ground rules.</strong> Set aside a quiet block of about 90 minutes and complete the test in one honest sitting. Work alone: no classmates, no AI tools, no solution websites &mdash; this is the one place where the mathematics must be entirely yours. A calculator may be used for <em>arithmetic only</em> (evaluating powers, quotients, and logarithms as numbers); every setup, conversion, property, guard, and step of reasoning must appear on your page. Lesson pages and notes stay closed &mdash; the properties this test needs are ones you have proved yourself.</p>
+            <p style="margin-bottom: 0;">Write the honor line at the top of your first page and sign it: <em>&ldquo;I completed this test on my own, without help from people, notes, or AI tools.&rdquo;</em> Intellectual honesty is a quarter of the rubric &mdash; and in the unit that taught you to reject answers your own algebra manufactured, it is also the method.</p>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #0E1C42;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; PART A &mdash; FLUENCY (Lessons 3-1 through 3-14)</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">Neat vertical work for every problem &mdash; one step per line, equals signs aligned, exact values before decimals, labeled answers.</p>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">1</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">An exponential function passes through \((0, 5)\) and \((3, 40)\). Find its rule \(f(x) = a \cdot b^x\) (show the solving for \(b\), not just the answer), state its percent growth rate per unit, and give its horizontal asymptote.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">2</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Sketch \(f(x) = 2^{x-1} - 4\) by hand: name the transformations of the parent \(2^x\), draw the asymptote dashed, and find <em>exactly</em> the \(y\)-intercept and the \(x\)-intercept (the \(x\)-intercept requires solving; show it). State domain and range in interval notation.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">3</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Evaluate exactly, no calculator, each in one clean line with its reason: &nbsp; &#9312; \(\log_2 32\) &emsp; &#9313; \(\log_9 3\) &emsp; &#9314; \(\ln e^7\) &emsp; &#9315; \(\log 0.001\). Then convert \(5^3 = 125\) to logarithmic form.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">4</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">&#9312; Expand completely: \(\log_3\!\left(\dfrac{27x^5}{y^2}\right)\). &nbsp; &#9313; Condense to a single logarithm: \(2\ln x + \tfrac{1}{2}\ln y - 3\ln z\). Name each property as you use it.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">5</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">A \$2{,}000 deposit earns 6% annual interest for 5 years. Compute the balance &#9312; compounded quarterly and &#9313; compounded continuously &mdash; formulas set up by hand, calculator for the arithmetic &mdash; then &#9314; state the difference the compounding style makes, to the cent.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">6</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Solve each exponential equation, exact answer first: &nbsp; &#9312; \(5 \cdot 3^{2x} = 45\) (no logarithm needed &mdash; say why) &emsp; &#9313; \(4^{x+1} = 9\) (exact form as a ratio of logarithms, then a decimal to three places).</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">7</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">&#9312; Graph \(f(x) = \sqrt{x-1} + 2\) with three labeled anchor points; state domain and range. &#9313; Solve \(\sqrt{2x+3} = x\) with the full guard-and-judge discipline &mdash; guards posted with reasons, every candidate judged against the original, verdict in a sentence.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">8</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">For \(f(x) = \begin{cases} x + 4 & \text{if } x < -1 \\ x^2 & \text{if } -1 \leq x < 2 \\ 6 - x & \text{if } x \geq 2 \end{cases}\): &nbsp; &#9312; evaluate \(f(-3)\), \(f(-1)\), and \(f(2)\), naming which piece owns each boundary input; &#9313; graph the function with every open and closed dot deliberate; &#9314; at each boundary, state whether the graph jumps or is a sewn seam &mdash; the two boundaries behave differently.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">9</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">The equation \(f(x) = 3x + 2\) meets the table \(g\): \((0, 2), (1, 4), (2, 8), (3, 16)\). &#9312; Diagnose \(g\)'s family from its ratios and write its rule. &#9313; Find <em>both</em> inputs where the table proves \(f\) and \(g\) are equal. &#9314; Compare their average rates of change on \([0, 3]\). &#9315; State who leads between the two meeting points, and who leads forever after the second &mdash; with the feature that certifies each claim.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">10</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Solve the system \(y = x^2 - 4x + 5\) and \(y = 2x - 3\) algebraically. Write both solutions as ordered pairs and verify each in <em>both</em> equations, arithmetic shown.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #0E1C42;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; PART B &mdash; REASONING (write these as arguments)</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">These problems are graded primarily on the quality of your reasoning. Full sentences where explanation is asked; every claim earned, not asserted.</p>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #0E1C42; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">11</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Prove the product rule for logarithms</strong> &mdash; \(\log_b(MN) = \log_b M + \log_b N\) &mdash; from the exponent rules, as you did in Lesson 3-7: set \(M = b^m\) and \(N = b^n\), and write every line, explaining the key step in a sentence. Then use your theorem to expose the impostor: a student claims \(\log_b(M + N) = \log_b M + \log_b N\). Refute it two ways &mdash; a numerical counterexample computed exactly, and one sentence explaining <em>why</em> the true rule pairs multiplication with addition (what do logarithms convert into what?).</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #0E1C42; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">12</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Solve \(\log_3(x+6) + \log_3(x-2) = 2\) with the full discipline: guards posted first (each with its reason), the condensed equation solved, every candidate judged against the <em>original</em>. State your conclusion in a full sentence &mdash; and then explain, in two or three more sentences, exactly <em>where</em> the counterfeit candidate was manufactured: which property enlarged the equation's domain, and why does the rejected value satisfy the condensed equation but not the original?</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #0E1C42; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">13</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">For which values of \(k\) does the line \(y = 2x + k\) meet the circle \(x^2 + y^2 = 5\) in exactly one point? Substitute, and let the discriminant of the resulting quadratic carry the argument &mdash; show its three cases (two meetings, one, none) as an inequality story in \(k\), not just the boundary values. For the positive \(k\), find the point of tangency and verify it lies on both graphs. Close with one sentence connecting the discriminant's sign to the picture.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #C7922C;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; PART C &mdash; SYNTHESIS (this unit meets Unit 2)</div>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">14</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">On the Unit 2 test you watched the sequence \(2^n\) overtake \(n^3\). Here is the continuous version, as a system: two consulting firms forecast a client's monthly demand with dueling models &mdash; Firm P (polynomial): \(y = x^2\); Firm E (exponential): \(y = 2^x\) (both in thousands of orders, \(x\) in months). Put the system \(y = x^2\), \(y = 2^x\) on trial:
+                <br />&#9312; <strong>Find the meetings.</strong> Verify by exact computation that \(x = 2\) and \(x = 4\) both solve the system, and give the two intersection points.
+                <br />&#9313; <strong>Prove there is a third.</strong> Compute both functions at \(x = -1\) and at \(x = 0\), observe which is larger at each, and explain in two sentences why a continuous pair that trades the lead must cross somewhere between &mdash; locating the third meeting inside \((-1, 0)\) without finding it exactly. (Label this fact honestly: <em>proved to exist, not computed</em>.)
+                <br />&#9314; <strong>Referee the intervals.</strong> Using test values, state who leads on each interval the three crossings create &mdash; and notice the polynomial's brief comeback on \((2, 4)\).
+                <br />&#9315; <strong>The verdict, as a four-line model defense.</strong> The client asks which forecast to trust for the long run. Answer in exactly four labeled lines: <em>claim</em> (which model wins, and from when); <em>structure</em> (compare the growth ratios &mdash; what does \(\frac{2^{x+1}}{2^x}\) equal always, and what happens to \(\frac{(x+1)^2}{x^2}\) as \(x\) grows?); <em>long-run</em> (the end-behavior honesty argument: why no coefficient rescues a polynomial against a surviving exponential); <em>domain of honesty</em> (what real-world ceiling &mdash; capacity, market size &mdash; eventually makes <em>both</em> models dishonest, and what shape the truth then demands).</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; overflow-x: auto;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128202; GRADING RUBRIC</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">The whole test is graded against the standing four-criterion rubric, each criterion scored out of 10. Part A supplies most of the evidence for understanding and precision; Parts B and C supply most of the evidence for reasoning.</p>
+        <table style="width: 100%; border-collapse: collapse; min-width: 580px;">
+            <thead>
+                <tr style="background: #0E1C42;">
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">Criteria</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">What excellent looks like</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: center; border: 1px solid #334;">Pts</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="background: #FFFFFF;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; width: 220px; vertical-align: top;">Understanding of the material</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">The right tool reaches every problem: logarithms unlock exponents, guards precede every squaring and every log condensation, boundary dots are deliberate, systems finish with verified ordered pairs, notation exact throughout.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">10 pts</td>
+                </tr>
+                <tr style="background: #F4F6FA;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Quality of reasoning</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">The proof in Part B reads as a real argument; counterfeit candidates are traced to their manufacturing step; the discriminant story covers all three cases; the synthesis verdict reasons about growth ratios and end behavior, not one data point.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">10 pts</td>
+                </tr>
+                <tr style="background: #FFFFFF;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Presentation &amp; precision</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Clean vertical work throughout, aligned equals signs, exact values before decimals, dashed asymptotes and deliberate endpoint dots on every graph, pages in order &mdash; forty points of work a stranger could follow.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">10 pts</td>
+                </tr>
+                <tr style="background: #F4F6FA;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Intellectual honesty</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Honor line signed and honored; work shown as actually done; proved and approximated facts labeled as such (Part C demands it); any problem you could not finish carries an honest note of where and why you stopped &mdash; which earns respect here, never punishment.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">10 pts</td>
+                </tr>
+                <tr style="background: #0E1C42;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #ffffff; border: 1px solid #55C8E8; text-align: right;" colspan="2">Total:</td>
+                    <td style="padding: 10px 12px; font-size: 16px; color: #55c8e8; border: 1px solid #55C8E8; text-align: center;">40 pts</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div style="background: #FDF3E3; border-left: 5px solid #C7922C; border-radius: 6px; padding: 18px 22px; margin-bottom: 24px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128228; SUBMISSION INSTRUCTIONS</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Canvas Assignment Name:</strong> Unit 3 Test &middot; Other Functions and Their Graphs</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;">Complete the test by hand on paper, honor line first. When you finish, photograph or scan your pages, combine them into <strong>one PDF</strong> with the pages in order, and upload the single file here. Name the file <strong>LastName_FirstName_Precalculus_Unit3Test.pdf</strong>.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Due:</strong> This test occupies Thursday&rsquo;s lesson slot this week &mdash; see the Canvas due date. The flex day remains available afterward for rest and catch-up in other work.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Four weeks ago, an exponent was a shorthand for repeated multiplication. Today you can read growth and decay in any costume, free a captive exponent with a logarithm you have proved, post guards no ghost can slip past, draw a border no piecewise law may cross &mdash; and make any two functions on the plane confess exactly where they meet. Show all of that on these pages.</div>
+    </div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Other Functions and Their Graphs</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">Unit 3 Test &middot; Other Functions and Their Graphs</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

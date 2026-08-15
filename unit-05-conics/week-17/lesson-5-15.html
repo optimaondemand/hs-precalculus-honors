@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-15</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-15</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-15</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Conics Capstone: Defending a Design</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to select the conic that meets an engineering brief and derive its equation from the brief's stated constraints, with my coordinate system declared first.</p></li>
+        <li><p>I will be able to defend the selection in writing with the four-line model defense &mdash; claim, structure, long-run, domain of honesty &mdash; citing computed evidence, not preference.</p></li>
+        <li><p>I will be able to anticipate the strongest rival conic for a given job and refute it with a geometric property.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Engineering brief</strong>: The client's statement of the job &mdash; dimensions, functions, constraints. The mathematician's first task is translating it into coordinates.</p>
+    <p><strong>Constraint</strong>: A condition the design must satisfy &mdash; "the dish is 1.2 m across," "the emitter and the stone are 40 cm apart." Each constraint becomes an equation your curve must obey.</p>
+    <p><strong>Focal length</strong>: The distance \(p\) from a parabola's vertex to its focus &mdash; for a reflector, the exact altitude at which the receiver must hang.</p>
+    <p><strong>Model defense</strong>: A short written argument that a chosen model fits its job &mdash; the four-line discipline you first practiced in Unit 2, now applied to geometry: claim, structure, long-run, domain of honesty.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Apollonius wrote eight books on the conics with no machine in view &mdash; pure curves, studied because they were beautiful and true. Eighteen centuries later Kepler found the planets riding them. Seven decades after that, in 1672, a French designer named Laurent Cassegrain proposed a telescope that put <em>two</em> conics to work in one tube: a parabolic mirror to catch starlight and send it toward a focus, and a small hyperbolic mirror, sharing that very focus, to relay the light back through the primary to an eyepiece. The design still flies &mdash; a version of it rode aboard the Hubble Space Telescope. This is the arc of the whole unit, and of its virtue: curves conceived in wonder, refined into <em>service</em>. Today, the unit's capstone: you become the engineer. A brief arrives, you choose the conic, derive its equation, and &mdash; the honors heart of the task &mdash; <strong>defend the choice in writing</strong>, with the mathematics as your evidence.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Service Properties: Which Curve Does Which Job</strong></h4>
+        <p>Every conic earns its keep with a geometric property no other curve possesses. This table is the engineer's menu &mdash; and the source of every defense you will write.</p>
+        <ul>
+            <li><strong>Circle</strong> &mdash; constant distance from the center. Serves: range boundaries, wheels, arches under uniform load.</li>
+            <li><strong>Parabola</strong> &mdash; reflects rays parallel to its axis <em>through the focus</em>, and vice versa. Serves: satellite dishes, headlights, solar troughs, radio telescopes. One favored point.</li>
+            <li><strong>Ellipse</strong> &mdash; reflects anything leaving one focus <em>to the other focus</em>. Serves: whispering galleries, lithotripsy (shattering kidney stones with focused shock waves), planetary orbits. Two favored points.</li>
+            <li><strong>Hyperbola</strong> &mdash; a ray aimed at one focus reflects toward the other; constant <em>difference</em> of distances. Serves: Cassegrain telescopes, LORAN navigation &mdash; and cooling towers, whose hyperbolic profile can be built from straight steel lines and stands with famous strength.</li>
+        </ul>
+        <p style="margin-bottom: 0;">Notice what the menu is really listing: <em>how many favored points the job needs</em>. Parallel-to-one-point is the parabola's monopoly; point-to-point is the ellipse's; point-past-point is the hyperbola's. Match the job's geometry, not your favorite curve.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p><em>The brief:</em> A satellite dish must be 8 feet across and 1.5 feet deep, with the receiver mounted at the correct height above the vertex. Design it &mdash; and defend it.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Declare coordinates first.</strong> Set the vertex at the origin, axis vertical: the cross-section is \(x^2 = 4py\) for some focal length \(p > 0\).</p>
+    <p><strong>Translate the constraints.</strong> "8 feet across, 1.5 feet deep" means the rim passes through the point \((4, 1.5)\) &mdash; <em>half</em> the width, full depth. Install it:</p>
+    <p style="text-align: center;">\(4^2 = 4p(1.5)\)</p>
+    <p style="text-align: center;">\(16 = 6p \;\;\Rightarrow\;\; p = \tfrac{8}{3} \approx 2.67 \text{ ft}\)</p>
+    <p>The equation is \(x^2 = \tfrac{32}{3}y\), and the receiver hangs at the focus, \(\left(0, \tfrac{8}{3}\right)\) &mdash; about 2 ft 8 in above the vertex. Verify against the brief: at \(y = 1.5\), \(x^2 = \tfrac{32}{3}(1.5) = 16\), so \(x = \pm 4\) &mdash; the rim is 8 ft across &#10003;.</p>
+    <p><strong>Now the defense &mdash; four lines, the genre you will write on the Focus set:</strong></p>
+    <p style="background: #EEF1F8; border-radius: 6px; padding: 12px 16px;"><strong>Claim:</strong> the cross-section is the parabola \(x^2 = \frac{32}{3}y\), receiver at the focus \((0, \frac{8}{3})\). <strong>Structure:</strong> satellite signals arrive as rays effectively parallel to the axis, and only the parabola reflects <em>every</em> such ray through one point &mdash; the property is the job description. <strong>Long-run:</strong> the property holds across the entire 8-ft aperture, rim to rim &mdash; not approximately near the center, but exactly, from the locus definition. <strong>Domain of honesty:</strong> the model is the ideal cross-section on \(-4 \le x \le 4\); it ignores panel thickness, wind load, and pointing error, and it says nothing beyond the rim &mdash; where the dish itself stops existing.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x^2 = \tfrac{32}{3}y\), focus at \(\left(0, \tfrac{8}{3}\right)\). The commonest design fatality happened silently in step two and was refused: the rim point is \((4, 1.5)\), never \((8, 1.5)\). Width is a diameter; the equation eats a radius.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p><em>The brief:</em> A lithotripter &mdash; the medical device that shatters kidney stones without surgery &mdash; needs a reflector chamber in which a shock-wave emitter and the stone sit 40 cm apart, with the chamber's half-depth limited to 15 cm. Design the reflector, and refute the rival.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Choose the curve from the job's geometry.</strong> Energy must leave one point and arrive at another point: two favored points &mdash; the ellipse's monopoly. Center the ellipse at the origin, foci on the \(x\)-axis: emitter at one focus, stone at the other.</p>
+    <p><strong>Translate the constraints.</strong> Foci 40 cm apart: \(2c = 40\), so \(c = 20\). Half-depth 15 cm is the semi-minor axis: \(b = 15\). The ellipse's relation supplies the rest:</p>
+    <p style="text-align: center;">\(a^2 = b^2 + c^2 = 225 + 400 = 625 \;\;\Rightarrow\;\; a = 25\)</p>
+    <p style="text-align: center;">\(\dfrac{x^2}{625} + \dfrac{y^2}{225} = 1, \qquad e = \dfrac{c}{a} = \dfrac{20}{25} = 0.8\)</p>
+    <p>The chamber is \(2a = 50\) cm long, and &mdash; the ellipse's gift &mdash; every reflected path from focus to focus has the same total length \(2a = 50\) cm, so all the shock waves arrive <em>in step</em>, their energy concentrated at one point of tissue and nowhere else.</p>
+    <p><strong>Refute the rival.</strong> Why not a parabola, the other famous reflector? Because the parabola serves <em>parallel-to-point</em>: energy from its focus leaves in a parallel beam and never regathers. The job is point-to-point; only the two-focus curve does point-to-point. The rival fails on structure, not on taste.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{x^2}{625} + \dfrac{y^2}{225} = 1\) with emitter and stone at \((\pm 20, 0)\) &mdash; an ellipse of eccentricity 0.8, chosen by the count of favored points and defended by the equal-path-length property.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p><em>The brief:</em> A power-station cooling tower has its narrowest radius, 30 m, at the throat. At 80 m above the throat, the structure must flare to a radius of 50 m. Model the profile.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Coordinates:</strong> origin at the throat's center, \(x\) the horizontal radius, \(y\) the height above the throat. The silhouette is a hyperbola opening left and right, vertices at the throat: \(a = 30\), so</p>
+    <p style="text-align: center;">\(\dfrac{x^2}{900} - \dfrac{y^2}{b^2} = 1\)</p>
+    <p><strong>Install the second constraint</strong> \((x, y) = (50, 80)\):</p>
+    <p style="text-align: center;">\(\dfrac{2500}{900} - \dfrac{6400}{b^2} = 1 \;\;\Rightarrow\;\; \dfrac{6400}{b^2} = \dfrac{2500}{900} - 1 = \dfrac{1600}{900}\)</p>
+    <p style="text-align: center;">\(b^2 = \dfrac{6400 \cdot 900}{1600} = 3600 \;\;\Rightarrow\;\; b = 60\)</p>
+    <p>The profile is \(\dfrac{x^2}{900} - \dfrac{y^2}{3600} = 1\), asymptotes \(y = \pm 2x\). Verify: at \(y = 80\), \(x^2 = 900\left(1 + \frac{6400}{3600}\right) = 900 \cdot \frac{25}{9} = 2500\), so \(x = 50\) &#10003;.</p>
+    <p><strong>Why a hyperbola at all?</strong> Two reasons an engineer can cite. Structurally, the hyperboloid (this profile revolved about the \(y\)-axis) is a <em>ruled surface</em> &mdash; it can be built entirely from straight beams, each lying wholly within the curved wall, giving concrete-and-steel strength from simple members. Functionally, the narrow throat accelerates the rising air (the same reason a nozzle narrows), then the flare above slows and disperses it. The curve is doing engineering on both counts.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{x^2}{900} - \dfrac{y^2}{3600} = 1\), \(y\) in meters above the throat, valid on the tower's actual height &mdash; the domain of honesty ends where the concrete does.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>The Four-Line Defense, Adapted for Conics</strong></h4>
+        <p>You first wrote this defense in Unit 2, arguing for truthful models; it returns now with geometric teeth. Every capstone defense &mdash; including the one your teacher method-grades this week &mdash; carries these four lines:</p>
+        <ul>
+            <li><strong>Claim</strong> &mdash; the conic, its equation, and your declared coordinate system, all in the brief's units.</li>
+            <li><strong>Structure</strong> &mdash; the geometric property that does the job (reflection law, constant sum, constant difference, ruled surface), stated as the <em>reason</em> this family and no other.</li>
+            <li><strong>Long-run</strong> &mdash; what the curve does at its edges: the aperture's limits, the asymptotes' direction, the closed orbit's return. Does the behavior at the boundary still serve the brief?</li>
+            <li><strong>Domain of honesty</strong> &mdash; where the model stops: the interval on which the equation describes real material, and the physics (thickness, load, alignment) the idealized curve ignores. A defense that hides its limits is an advertisement, not an argument.</li>
+        </ul>
+        <p style="margin-bottom: 0;">Four lines, each citing a computed number or a named property. That is what "citing evidence from the mathematics" means.</p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE CROSS-EXAMINATION</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">On this week's Focus set you will draft a design defense and then hand it to your AI tutor with one instruction: <em>&ldquo;Attack the weakest line of this defense.&rdquo;</em> Your job is to judge whether the attack lands. Here is a rehearsal. A student defended the Example 1 dish, and the AI returned:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;Your structural claim is overstated. A circular arc of a large enough radius would focus the signal just as well and is cheaper to manufacture, so the parabola is not actually necessary.&rdquo;</p>
+            <p>Sounds authoritative. It is false &mdash; and you can refute it from the locus definition. A parabola sends <em>every</em> ray parallel to its axis through one exact point: that is what "distance to focus equals distance to directrix" builds into the curve. A circular arc has no such point: rays striking far from its center miss the would-be focus (opticians call the blur <em>spherical aberration</em>), so a sphere "focuses" only the central rays, approximately. Across an 8-foot aperture the difference is the design. The attack does not land &mdash; and now the defense is stronger for having survived it.</p>
+            <p style="margin-bottom: 0;">This is the AI discipline of the whole course in one act: the machine is a useful <em>opponent</em>, and a mathematician judges the argument, never the confidence. When the AI attacks your capstone defense, verify every mathematical claim in the attack before you accept or dismiss a word of it &mdash; some attacks will land, and honest engineers thank the ones that do.</p>
+        </div>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos or Excel: Draw It to Scale</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>An engineer never defends an unseen design. Before you write a word of your capstone defense, build the picture &mdash; either tool serves:</p>
+        <ol>
+            <li><strong>Desmos</strong> (<a href="https://www.desmos.com/calculator">desmos.com/calculator</a>, or below): graph your design restricted to its real extent &mdash; for the Example 1 dish, <strong>y = 3x^2/32 {-4 &lt;= x &lt;= 4}</strong> &mdash; then plot the focus <strong>(0, 8/3)</strong> and check the picture against the brief: is the rim where the client said? Does the receiver hang <em>inside</em> the aperture's reach? For a hyperbola, add the asymptotes as dashed lines and watch the wall hug them.</li>
+            <li><strong>Excel</strong>: put \(x\) in column A from \(-4\) to \(4\) in steps of \(0.5\), the depth formula <strong>=3*A2^2/32</strong> in column B, and read the table like a machinist: depth at the rim 1.5 ft &#10003;, depth at half-radius \(0.375\) ft &mdash; a quarter of the rim depth, because doubling \(x\) quadruples \(x^2\). An <strong>Insert &rarr; Scatter chart</strong> gives the profile a builder could check with a tape measure. (If you save the workbook, name it <strong>LastName_FirstName_ConicDesign_Precalculus.xlsx</strong> in your <strong>Optima &rarr; Math &rarr; PrecalculusHonors</strong> folder &mdash; the submission itself stays a PDF.)</li>
+        </ol>
+        <p>Either way, the standard is the same: the picture confirms; your derivation convinces.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A headlight's bulb must sit at the focus, 2 cm from the vertex of its parabolic reflector. Write the equation, and find how wide the reflector is at a depth of 4.5 cm.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Vertex at the origin, \(p = 2\): the reflector is \(x^2 = 8y\). At depth \(y = 4.5\): \(x^2 = 8(4.5) = 36\), so \(x = \pm 6\) &mdash; the reflector is <strong>12 cm wide</strong> at that depth. (Width is \(2x\): the radius-vs-diameter discipline again, in the other direction.) The bulb's light leaves the focus, strikes the parabola, and exits as a parallel beam &mdash; Example 1's property run in reverse.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A whispering gallery is a 30 m long, 18 m wide ellipse (a full ellipse in cross-section). Where should two people stand to hear each other whisper &mdash; and how far is each from the nearer end wall?</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(a = 15\), \(b = 9\): \(c^2 = a^2 - b^2 = 225 - 81 = 144\), so \(c = 12\). They stand at the foci, \((\pm 12, 0)\) &mdash; 24 m apart, and each stands \(a - c = 15 - 12 = 3\) m from the nearer end wall. Every whisper leaving one focus reflects off the wall to the other, and every path takes the same total distance \(2a = 30\) m, so the sound arrives whole.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Feeding a <em>diameter</em> to an equation that eats a <em>radius</em>. "The dish is 1.2 m across and 18 cm deep" puts the rim at \((0.6, 0.18)\) &mdash; substitute \(x = 1.2\) instead and your focal length quadruples, the receiver hangs uselessly high, and every line of a beautifully written defense defends the wrong dish. Declare your coordinates <em>first</em>, mark the rim point on a sketch <em>before</em> substituting, and let the verification step (put the focal length back, recover the brief's width) catch what haste hides. One sketch is worth four lines of apology.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The first hyperboloid tower was raised in 1896 by the Russian engineer Vladimir Shukhov for an exposition in Nizhny Novgorod &mdash; a water tower whose gracefully curved lattice was built entirely of <em>straight</em> steel members, because a hyperboloid is a ruled surface: through every point of it run two perfectly straight lines lying wholly within the surface. Shukhov patented the form, and its descendants &mdash; from Moscow's Shukhov radio tower to the cooling towers of Example 3 &mdash; still trade on the same theorem. A curve that can be built from straight lines is a curve that serves the builder twice.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The capstone asks of you what this unit has been quietly building toward: not another equation solved, but a choice <em>defended</em> &mdash; the right curve for the job, derived from the brief's own numbers and argued in four honest lines. That is this week's <strong>Focus assignment</strong>, the one your teacher grades for method: bring the derivation with its declared coordinates, and bring the defense with its named property, and let the AI's cross-examination sharpen both. On <strong>Thursday</strong> the Unit 5 test gathers the whole family into one sitting &mdash; the sliced cone, the four loci and their derivations, completing the square as the master key, eccentricity's single-number verdict, and the systems machinery counting crossings.</p>
+    <p>And then, look at where you stand. Eighteen weeks ago this course began with sequences &mdash; patterns marching one term at a time. From them grew the function families: polynomial and rational, exponential and logarithmic, radical and piecewise. Unit 4 taught the families to <em>relate</em> &mdash; composed, decomposed, inverted. And this unit drew the relations as <em>curves in the plane</em>, sliced from a cone and put to work in dishes, chambers, and towers. One semester, one arc: from counting to curving, every stage built on the one before. Next week &mdash; the Semester 1 finals week &mdash; you walk the whole arc in review and then show, on one cumulative final, that it holds together. It does. You built it.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Every conic's "service property" is a restatement of its locus definition. Trace one example all the way: how does "distance to focus equals distance to directrix" become "parallel rays meet at the focus"?</p>
+    <p>2. What makes a model defense an argument rather than an advertisement &mdash; and why is the domain-of-honesty line the one that most separates the two?</p>
+    <p>3. The lithotripter rejected the parabola on structure, not on taste. What question about a brief tells you, before any algebra, which conic family the job requires?</p>
+    <p>4. Apollonius studied these curves with no application in view, and the applications arrived centuries later. What does that pattern suggest about the worth of studying something because it is true and beautiful?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-15 &middot; Conics Capstone: Defending a Design</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

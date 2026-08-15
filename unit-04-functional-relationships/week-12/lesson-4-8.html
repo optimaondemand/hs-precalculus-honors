@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 4-8</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 4</div>
+        <div style="font-size: 13px; color: #666;">Functional Relationships</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">4-8</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Functional Relationships</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">4-8</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Inverse Functions</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to state the definition of inverse functions and the notation \(f^{-1}\), and explain why \(f^{-1}\) does not mean \(\frac{1}{f}\).</p></li>
+        <li><p>I will be able to verify by composition &mdash; in both orders &mdash; that two functions are inverses, and reject near-misses that fail the ceremony.</p></li>
+        <li><p>I will be able to read inverse values from swapped input-output pairs, and recognize the exponential-logarithm pair from Unit 3 as inverses.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Inverse function</strong>: The function \(f^{-1}\) that exactly undoes \(f\): whenever \(f\) sends \(a\) to \(b\), \(f^{-1}\) sends \(b\) back to \(a\). From the Latin <em>invertere</em>, &ldquo;to turn about.&rdquo;</p>
+    <p><strong>Identity function</strong>: The do-nothing function \(I(x) = x\), which returns every input unchanged. It plays the role for composition that 1 plays for multiplication and 0 for addition.</p>
+    <p><strong>Invertible</strong>: A function that <em>has</em> an inverse. Not every function does &mdash; today's honors stretch shows you why, and next week supplies the repair.</p>
+    <p><strong>Self-inverse</strong>: A function that is its own inverse, undoing itself: \(f(f(x)) = x\).</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>This week began with Leibniz naming the function and Euler dressing it in \(f(x)\); it ends with a third act of notation. In 1813, the English astronomer John Herschel &mdash; son of the William Herschel who discovered Uranus &mdash; proposed writing \(f^{-1}(x)\) for the function that undoes \(f\). His logic was Wednesday's lesson taken seriously: if \(f^2(x)\) means \(f(f(x))\) &mdash; an exponent counting <em>applications</em> of the machine, as in our Example 3 relay \((f \circ f)\) &mdash; then \(f^{-1}\) should name the machine that <em>takes one application back</em>. Compose \(f\) with \(f^{-1}\) and the applications cancel: \(f^{-1}(f(x)) = x\), one step forward, one step back, arriving where you began. The exponent is a composition exponent, not an arithmetic one &mdash; and that single distinction, held firmly, prevents the most common error of the entire topic.</p>
+    <p>All week the two functions in a composition have cooperated: the inner speaks, the outer responds. An inverse pair is that cooperation perfected into <strong>mutual undoing</strong>: whatever \(f\) does to a number, \(g\) undoes &mdash; and, remarkably, whatever \(g\) does, \(f\) undoes right back. Neither function is the master; each returns the other's work exactly. Their composition, in either order, is the do-nothing identity function \(I(x) = x\): the one case promised on Wednesday where \(f \circ g = g \circ f\), and the structural reason could not be more special.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>The Verification Ceremony</strong></h4>
+        <p>Functions \(f\) and \(g\) are <strong>inverses of each other</strong> exactly when both compositions collapse to the identity:</p>
+        <p style="text-align: center;">\(f(g(x)) = x \;\text{ for every } x \text{ in the domain of } g, \qquad g(f(x)) = x \;\text{ for every } x \text{ in the domain of } f\)</p>
+        <p style="margin-bottom: 0;">Then we write \(g = f^{-1}\) and \(f = g^{-1}\). <strong>Both orders are required</strong> &mdash; the ceremony has two parts, and a pair that passes one test can fail the other (the honors stretch below exhibits a famous culprit). Two consequences come free: if \(f(a) = b\) then \(f^{-1}(b) = a\), so every input-output pair swaps; and therefore the domain of \(f\) is the range of \(f^{-1}\), and the range of \(f\) is the domain of \(f^{-1}\) &mdash; the two functions trade territories entirely.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Verify that \(f(x) = x + 7\) and \(g(x) = x - 7\) are inverses of each other.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Run both halves of the ceremony:</p>
+    <p style="text-align: center;">\(f(g(x)) = f(x - 7) = (x - 7) + 7 = x\) &#10003;</p>
+    <p style="text-align: center;">\(g(f(x)) = g(x + 7) = (x + 7) - 7 = x\) &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Both compositions are the identity, so \(g = f^{-1}\). Adding seven and subtracting seven undo each other &mdash; no surprise, but notice what the ceremony bought: not a feeling of undoing, but a <em>proof</em>, two lines long, that works for every real number at once.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Verify that \(f(x) = 3x - 4\) and \(g(x) = \dfrac{x + 4}{3}\) are inverses of each other, and narrate <em>why</em> \(g\) has the form it has.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Describe \(f\) as a sequence of duties: <em>multiply by 3, then subtract 4</em>. To undo a sequence you undo each step <strong>in reverse order</strong> &mdash; the socks-and-shoes principle: shoes went on last, so they come off first. So the undoing must <em>add 4 first, then divide by 3</em> &mdash; and that is exactly \(g(x) = \frac{x+4}{3}\). Now the ceremony:</p>
+    <p style="text-align: center;">\(f(g(x)) = 3\left(\dfrac{x + 4}{3}\right) - 4 = (x + 4) - 4 = x\) &#10003;</p>
+    <p style="text-align: center;">\(g(f(x)) = \dfrac{(3x - 4) + 4}{3} = \dfrac{3x}{3} = x\) &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Both compositions collapse to the identity, so \(g = f^{-1}\). Watch the algebra of the first composition closely: the \(3\) and the \(\frac{1}{3}\) annihilate first, <em>then</em> the \(+4\) and \(-4\) &mdash; the undoing really does happen in reverse order, step by step, right there in the symbols.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>A student claims \(k(x) = \dfrac{x}{2} - 1\) is the inverse of \(h(x) = 2x + 1\). Put the claim on trial &mdash; and if it fails, find and verify the true inverse.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The trial is the ceremony:</p>
+    <p style="text-align: center;">\(k(h(x)) = \dfrac{2x + 1}{2} - 1 = x + \dfrac{1}{2} - 1 = x - \dfrac{1}{2}\) &#10007;</p>
+    <p>Not the identity &mdash; the claim is already dead, but run the other order for the autopsy:</p>
+    <p style="text-align: center;">\(h(k(x)) = 2\left(\dfrac{x}{2} - 1\right) + 1 = x - 2 + 1 = x - 1\) &#10007;</p>
+    <p>Both compositions miss, each by a constant. The diagnosis is a courtesy failure: \(h\) says <em>double, then add 1</em>, so its undoing must <em>subtract 1 first, then halve</em>. The student's \(k\) halves first and subtracts 1 second &mdash; the right undoing steps in the wrong order. The true inverse is</p>
+    <p style="text-align: center;">\(h^{-1}(x) = \dfrac{x - 1}{2}\)</p>
+    <p>and it passes both halves of the ceremony:</p>
+    <p style="text-align: center;">\(h(h^{-1}(x)) = 2\left(\dfrac{x-1}{2}\right) + 1 = (x - 1) + 1 = x\) &#10003; \(\qquad h^{-1}(h(x)) = \dfrac{(2x + 1) - 1}{2} = \dfrac{2x}{2} = x\) &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(k \neq h^{-1}\); the true inverse is \(h^{-1}(x) = \frac{x-1}{2}\). The moral is the week's convention biting back: composition is order-sensitive, so undoing is order-sensitive too. And note the method: the claim was settled not by opinion or by one lucky test value, but by composition &mdash; <strong>the ceremony is the court</strong>.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Verify that \(f(x) = x^3 + 2\) and \(g(x) = \sqrt[3]{x - 2}\) are inverses, then use the pair-swapping consequence: given that \(f(1) = 3\), evaluate \(g(3)\) without computing a cube root.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(f(g(x)) = \left(\sqrt[3]{x - 2}\right)^3 + 2 = (x - 2) + 2 = x\) &#10003;</p>
+    <p style="text-align: center;">\(g(f(x)) = \sqrt[3]{(x^3 + 2) - 2} = \sqrt[3]{x^3} = x\) &#10003;</p>
+    <p>(That last step is honest <em>because the index is odd</em> &mdash; \(\sqrt[3]{x^3} = x\) for every real \(x\), with no absolute-value ambush. Unit 3's parity lesson, still on duty.)</p>
+    <p>Now the swap: \(f(1) = 3\) means \(f\) carries \(1 \mapsto 3\), so its inverse must carry \(3 \mapsto 1\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(g = f^{-1}\), and \(g(3) = 1\) &mdash; read off, not computed. Every fact you know about \(f\) is a fact about \(f^{-1}\) wearing its coordinates swapped; the two functions share one supply of information, stored in opposite directions.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>You Have Already Met an Inverse Pair</strong></h4>
+        <p>In Unit 3 you used two identities so often they became reflexes:</p>
+        <p style="text-align: center;">\(\log_{10}\!\left(10^x\right) = x \;\text{ for all } x, \qquad 10^{\log_{10} x} = x \;\text{ for } x &gt; 0\)</p>
+        <p>Look at them with this week's eyes: they are <em>exactly the verification ceremony</em> &mdash; two compositions collapsing to the identity. The exponential \(10^x\) and the logarithm \(\log_{10} x\) are inverse functions, and every equation you solved in Unit 3 by &ldquo;taking the log of both sides&rdquo; was an act of composing with an inverse to undo an exponential. You had the practice before the theory; today the theory arrives and finds the seat already warm.</p>
+        <p style="margin-bottom: 0;">One detail deserves a raised eyebrow: the first identity holds for <em>all</em> \(x\), the second only for \(x &gt; 0\). That small asymmetry is the domain-and-range trade in action &mdash; the logarithm's domain is only \((0, \infty)\) because that is the exponential's range. Hold the eyebrow raised until Lesson 4-11, where this pair returns and the loop closes for good.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: The Signature of Undoing</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>An inverse pair has a graphical signature, and Desmos will draw it on demand. At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below):</p>
+        <ol>
+            <li>Define Example 2's pair: <strong>f(x) = 3x - 4</strong> and <strong>g(x) = (x + 4)/3</strong>.</li>
+            <li>Graph the two compositions: <strong>y = f(g(x))</strong> and <strong>y = g(f(x))</strong>. Both draw the same graph: the 45&deg; line through the origin &mdash; the identity \(y = x\). <strong>The identity line is the signature of mutual undoing.</strong></li>
+            <li>Now graph Example 3's failed pair: define <strong>h(x) = 2x + 1</strong>, <strong>k(x) = x/2 - 1</strong>, and plot <strong>y = k(h(x))</strong>. It draws \(y = x - \frac{1}{2}\): parallel to the identity, half a unit low &mdash; a near-miss you can see. Close only counts in horseshoes; the ceremony demands the identity exactly.</li>
+            <li>One more look, with the fix: add <strong>y = (x - 1)/2</strong> (the true \(h^{-1}\)), then turn on a dashed <strong>y = x</strong>. Look at the graphs of \(h\) and \(h^{-1}\) themselves: mirror images across that dashed line. Every swapped pair \((a, b) \leftrightarrow (b, a)\) reflects across \(y = x\) &mdash; next week we make that mirror precise and put it to work.</li>
+        </ol>
+        <p style="margin-bottom: 0;">The calculator confirms; your algebra convinces &mdash; and on this week's Focus set, the algebra is the part your teacher reads.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Verify that \(g(x) = 2x - 2\) is the inverse of \(f(x) = \frac{x}{2} + 1\) &mdash; both orders, every step. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(f(g(x)) = \frac{2x - 2}{2} + 1 = (x - 1) + 1 = x\) &#10003;. &nbsp; \(g(f(x)) = 2\left(\frac{x}{2} + 1\right) - 2 = (x + 2) - 2 = x\) &#10003;. Both compositions are the identity, so \(g = f^{-1}\). In words: \(f\) halves then adds 1; \(g\) subtracts 1 then doubles &mdash; same steps, undone in reverse order.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Show that \(f(x) = 6 - x\) is its own inverse, and say what that suggests about its graph.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(f(f(x)) = 6 - (6 - x) = x\) &#10003; &mdash; one composition suffices here, since both orders are the same composition. \(f\) is <strong>self-inverse</strong>: subtracting from 6 undoes subtracting from 6, the way a reflection undoes itself. And since a function and its inverse mirror each other across \(y = x\), a self-inverse function must be <em>its own mirror image</em> &mdash; graph \(y = 6 - x\) and \(y = x\) in Desmos and see the perfect symmetry.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Reading \(f^{-1}(x)\) as \(\dfrac{1}{f(x)}\). The \(-1\) is Herschel's <strong>composition</strong> exponent &mdash; it counts applications of the machine, not factors in a product. The two objects are not merely different; the reciprocal <em>fails the ceremony outright</em>. Take \(f(x) = x + 3\): the reciprocal is \(\frac{1}{x+3}\), and \(f\!\left(\frac{1}{x+3}\right) = \frac{1}{x+3} + 3\), nowhere near \(x\). The true inverse is \(x - 3\). When you need the reciprocal of a function's output, write \(\left[f(x)\right]^{-1}\) or \(\frac{1}{f(x)}\) and leave \(f^{-1}\) to mean what Herschel meant: the undoing.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Herschel knew his \(f^{-1}\) notation was a gamble &mdash; he admitted the exponent could be misread as a reciprocal, but argued the analogy was too valuable to surrender: composition behaves enough like multiplication that borrowing its exponents lets one symbol system serve two structures. Mathematics kept the bargain, ambiguity and all. Two centuries later the same convention runs through the trigonometry you will meet in Semester 2 &mdash; \(\sin^{-1} x\) names an inverse function, not \(\frac{1}{\sin x}\) &mdash; so the care you build today is a long-term investment.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>This unit's functions have been in relationship all week &mdash; combined, chained, cooperating &mdash; and today the relationship reached its most courteous form: mutual undoing, each function returning the other's work exactly, their composition in either order the do-nothing identity. You learned the ceremony that certifies the relationship (both compositions, always), the notation that names it (Herschel's composition exponent), the swap that powers it (every pair \((a,b)\) reversed, domain and range trading places), and the pair you had been using all along without the name &mdash; the exponential and the logarithm. This is the week's <strong>Focus assignment</strong>: your teacher will read two verification ceremonies for method, so perform them in full, both orders, verdicts in sentences, nothing waved through. Next week finishes the story: an algebraic procedure for <em>finding</em> \(f^{-1}\) rather than checking a candidate, the mirror across \(y = x\) made precise, the repair for functions that fail to be invertible &mdash; you glimpsed the failure in \(\sqrt{x^3}\)'s well-behaved cousin \(\sqrt{x^2} = |x|\) &mdash; and, in Lesson 4-11, the exponential-logarithm loop closed for good.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What exactly must be shown before two functions may be called inverses &mdash; and why is verifying one composition not half the work, but an unfinished proof?</p>
+    <p>2. In what sense is the identity function the &ldquo;do-nothing&rdquo; of composition, and why is landing on it &mdash; exactly, not approximately &mdash; the whole test?</p>
+    <p>3. Why must the undoing steps run in reverse order &mdash; and how did Example 3's near-miss candidate fail precisely this principle?</p>
+    <p>4. The identities \(\log(10^x) = x\) and \(10^{\log x} = x\) served you all through Unit 3. What were they secretly certifying &mdash; and why does the second one carry a condition the first does not?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">4-8 &middot; Inverse Functions</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

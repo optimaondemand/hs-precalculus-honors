@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-4</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-4</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-4</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Graphing Parabolas</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to graph parabolas with vertex \((h, k)\) in both orientations, identifying vertex, focus, directrix, axis of symmetry, and latus rectum.</p></li>
+        <li><p>I will be able to convert a parabola's general form to standard form by completing the square &mdash; including factoring out \(4p\) before reading the vertex.</p></li>
+        <li><p>I will be able to write a parabola's equation from any sufficient set of key features.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Standard form (vertex \((h,k)\))</strong>: \((x-h)^2 = 4p(y-k)\) for a vertical axis, \((y-k)^2 = 4p(x-h)\) for a horizontal axis &mdash; yesterday's origin forms, translated.</p>
+    <p><strong>Latus rectum</strong>: The chord of the parabola through the focus, perpendicular to the axis of symmetry; its length is always \(|4p|\). Latin for &ldquo;upright side&rdquo; &mdash; the term is a direct translation of Apollonius' own Greek, still on duty after twenty-two centuries.</p>
+    <p><strong>Focal chord</strong>: Any chord through the focus; the latus rectum is the shortest one, and the only one perpendicular to the axis.</p>
+    <p><strong>Axis of symmetry</strong>: For vertex form, the line \(x = h\) (vertical case) or \(y = k\) (horizontal case) &mdash; the fold line of the curve.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>In 1638, under house arrest in Arcetri, <strong>Galileo</strong> published his <em>Two New Sciences</em> and in it a claim both simple and revolutionary: a projectile &mdash; any thrown stone, any cannonball &mdash; travels a path that &ldquo;is a parabola, exactly.&rdquo; The curve Apollonius had sliced from a cone for pure love of geometry turned out to be drawn in the air by every fountain and fastball on Earth. But Galileo's parabolas do not sit politely with their vertices at the origin; they arc over castle walls with vertices wherever the throw puts them. Today we follow them there. The tool is one you have owned since Unit 3: <strong>translation</strong>. Replacing \(x\) with \(x - h\) and \(y\) with \(y - k\) slides any graph \(h\) right and \(k\) up &mdash; and it extends the same courtesy to curves that are not functions at all. Yesterday's two equations slide into today's two:</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Parabolas with Vertex \((h, k)\)</strong></h4>
+        <ul>
+            <li>\((x-h)^2 = 4p(y-k)\) &mdash; <strong>vertical axis</strong> \(x = h\). Focus \((h, k+p)\); directrix \(y = k - p\). Opens up (\(p>0\)) or down (\(p<0\)).</li>
+            <li>\((y-k)^2 = 4p(x-h)\) &mdash; <strong>horizontal axis</strong> \(y = k\). Focus \((h+p, k)\); directrix \(x = h - p\). Opens right (\(p>0\)) or left (\(p<0\)).</li>
+            <li><strong>Latus rectum:</strong> length \(|4p|\), centered on the focus, perpendicular to the axis &mdash; its two endpoints sit \(|2p|\) either side of the focus.</li>
+        </ul>
+        <p style="margin-bottom: 0;"><strong>The five-step graphing routine:</strong> &#9312; the squared variable names the axis direction; &#9313; read the vertex \((h,k)\) with flipped signs; &#9314; divide the coefficient by 4 to get \(p\), sign and all; &#9315; step \(p\) along the axis to the focus, and mirror to the directrix; &#9316; mark the two latus rectum endpoints and sweep the curve through them and the vertex. Three plotted points and a dashed line &mdash; an honest sketch in under a minute.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Graph \((x-3)^2 = 8(y+1)\): find the vertex, focus, directrix, axis, and latus rectum endpoints.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Run the routine in order:</p>
+    <p style="text-align: center;">Axis: \(x\) squared &rarr; vertical axis, the line \(x = 3\)</p>
+    <p style="text-align: center;">Vertex: \((3, -1)\) &mdash; signs flipped from \((x-3)\) and \((y+1)\)</p>
+    <p style="text-align: center;">\(4p = 8 \;\Rightarrow\; p = 2 > 0\): opens upward</p>
+    <p style="text-align: center;">Focus: \((3, -1 + 2) = (3, 1)\) &emsp; Directrix: \(y = -1 - 2 = -3\)</p>
+    <p style="text-align: center;">Latus rectum: length \(|4p| = 8\), endpoints \((3 \pm 4, 1) = (-1, 1)\) and \((7, 1)\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Plot the vertex \((3,-1)\), the endpoints \((-1,1)\) and \((7,1)\), dash in the directrix \(y = -3\), and sweep the upward curve through the three points, wrapping around the focus \((3,1)\). Sanity check: the endpoint \((7,1)\) should satisfy the equation &mdash; \((7-3)^2 = 16\) and \(8(1+1) = 16\) &#10003;.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Analyze \((y+2)^2 = -4(x-1)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">Axis: \(y\) squared &rarr; horizontal axis, the line \(y = -2\)</p>
+    <p style="text-align: center;">Vertex: \((1, -2)\)</p>
+    <p style="text-align: center;">\(4p = -4 \;\Rightarrow\; p = -1 < 0\): opens <strong>left</strong></p>
+    <p style="text-align: center;">Focus: \((1 + (-1), -2) = (0, -2)\) &emsp; Directrix: \(x = 1 - (-1) = 2\)</p>
+    <p style="text-align: center;">Latus rectum: length \(|-4| = 4\), endpoints \((0, -2 \pm 2) = (0, 0)\) and \((0, -4)\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Vertex \((1,-2)\), focus \((0,-2)\), directrix \(x = 2\), curve opening left through \((0,0)\) and \((0,-4)\). Notice the geometry stayed loyal: the curve wraps around its focus (to the left) and turns its back on its directrix (standing to the right). Check an endpoint: \((0 - (-2))^2 \Rightarrow (0+2)^2 = 4\) and \(-4(0-1) = 4\) &#10003;.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Find the vertex, focus, and directrix of \(y^2 + 6y - 8x + 1 = 0\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>General form &mdash; and the master key turns again. \(y\) is the squared variable, so complete the square in \(y\) and herd everything else to the other side:</p>
+    <p style="text-align: center;">\(y^2 + 6y = 8x - 1\)</p>
+    <p style="text-align: center;">\(y^2 + 6y + 9 = 8x - 1 + 9\)</p>
+    <p style="text-align: center;">\((y + 3)^2 = 8x + 8\)</p>
+    <p>One step remains, and it is the step most often skipped: <strong>factor out the \(4p\) coefficient</strong> before reading anything.</p>
+    <p style="text-align: center;">\((y+3)^2 = 8(x + 1)\)</p>
+    <p style="text-align: center;">Vertex \((-1, -3)\); \(4p = 8 \Rightarrow p = 2\): opens right</p>
+    <p style="text-align: center;">Focus: \((-1 + 2, -3) = (1, -3)\) &emsp; Directrix: \(x = -3\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Vertex \((-1,-3)\), focus \((1,-3)\), directrix \(x = -3\), latus rectum endpoints \((1, -3 \pm 4) = (1, 1)\) and \((1, -7)\). Had we read the vertex from \((y+3)^2 = 8x + 8\) without factoring, we would have announced \(x = -8\) &mdash; a vertex seven units from the truth. The factoring is not cosmetic; it is where the honest \(h\) lives.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Write the equation of the parabola with vertex \((2, 4)\) and focus \((2, 7)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Vertex and focus share \(x = 2\), so the axis is vertical and the form is \((x-h)^2 = 4p(y-k)\). The focus sits \(7 - 4 = 3\) <em>above</em> the vertex:</p>
+    <p style="text-align: center;">\(p = 3 \;\Rightarrow\; 4p = 12\)</p>
+    <p style="text-align: center;">\((x - 2)^2 = 12(y - 4)\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((x-2)^2 = 12(y-4)\), opening upward, with directrix \(y = 4 - 3 = 1\) &mdash; three units below the vertex, mirroring the focus three above, exactly as the locus definition demands.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Why the Latus Rectum Makes a Sketch Honest</strong></h4>
+        <p>A vertex alone tells you where a parabola sits, but nothing about how wide it opens &mdash; and a freehand curve through one point is a guess, not a graph. The latus rectum ends the guessing:</p>
+        <ul>
+            <li>Its endpoints are <em>exact points of the curve</em> at the focus's height, so they pin the parabola's true width where its geometry is busiest.</li>
+            <li>Its length \(|4p|\) makes \(p\) <em>visible</em>: a large \(|p|\) (focus far from vertex) gives a long latus rectum and a wide, open curve; a small \(|p|\) hugs the focus tight and the curve closes up narrow.</li>
+        </ul>
+        <p style="margin-bottom: 0;">Vertex, two latus rectum endpoints, dashed directrix: three true points and a guardrail. That is the whole apparatus of an honest hand sketch &mdash; and when your Desmos graph disagrees with it, one of the two of you has misread \(p\).</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: The \(p\) Machine</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), build every parabola of this lesson at once:</p>
+        <ol>
+            <li>Type <strong>(y-k)^2 = 4p(x-h)</strong> and let Desmos create sliders for \(h\), \(k\), and \(p\).</li>
+            <li>Add the focus as the point <strong>(h+p, k)</strong> and the directrix as the line <strong>x = h-p</strong>. They now travel with the sliders.</li>
+            <li>Set \(h = 1\), \(k = -2\), \(p = -1\) and land exactly on Example 2 &mdash; vertex \((1,-2)\), focus \((0,-2)\), directrix \(x=2\), matching your hand analysis point for point.</li>
+            <li>Now drag \(p\) slowly through zero. Watch the curve open wide at large \(|p|\), pinch narrow near zero, degenerate at \(p = 0\), and flip direction as the sign changes &mdash; while focus and directrix trade places across the vertex. The slider is Lesson 5-3's theory running as a machine. Verify Example 3 the same way with the vertical form <strong>(x-h)^2 = 4p(y-k)</strong>. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Convert \(x^2 - 4x - 4y + 8 = 0\) to standard form and list vertex, \(p\), focus, directrix, and latus rectum endpoints. Full routine on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(x^2 - 4x = 4y - 8\); add 4 to both sides: \((x-2)^2 = 4y - 4 = 4(y - 1)\). Vertex \((2, 1)\); \(4p = 4\) so \(p = 1\), opening up; focus \((2, 2)\); directrix \(y = 0\) (the \(x\)-axis itself); latus rectum endpoints \((2 \pm 2, 2) = (0,2)\) and \((4,2)\). Check an endpoint: \((0-2)^2 = 4\), \(4(2-1) = 4\) &#10003;.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Write the equation of the parabola with vertex \((-1, 2)\) and directrix \(y = 5\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            The directrix is horizontal and stands <em>above</em> the vertex, so the axis is vertical and the curve opens <strong>down</strong>, away from the line: \(p = 2 - 5 = -3\). Equation: \((x+1)^2 = 4(-3)(y-2) = -12(y-2)\). Focus: \((-1, 2 + (-3)) = (-1, -1)\), mirroring the directrix three units on the other side.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Reading the vertex before factoring out \(4p\): stopping at \((y+3)^2 = 8x + 8\) and declaring \(h = -8\). The standard form requires the right side to be \(4p \cdot (\,\text{variable} - h\,)\) &mdash; <em>coefficient pulled all the way out</em> &mdash; and only then is \(h\) sitting where you can read it: \(8(x+1)\) means \(h = -1\), not \(-8\). The companion slip is halving when you should quarter: the latus rectum runs \(|2p|\) either side of the focus for a <em>total</em> of \(|4p|\); make its endpoints with \(2p\), not \(4p\), or your sketch will be twice as wide as the truth.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Galileo could not prove his parabola claim with calculus &mdash; it did not exist yet. He argued it from proportions: horizontal motion covers equal distances in equal times, while vertical fall grows with the <em>square</em> of time, and a curve whose one coordinate is proportional to the square of the other is precisely \(x^2 = 4py\) in disguise. He also carefully noted the fine print modern physics still teaches: no air resistance, and a flat Earth approximation &mdash; an honest mathematician labeling the domain where his model tells the truth. Unit 2 would approve.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The parabola now travels: \((x-h)^2 = 4p(y-k)\) and \((y-k)^2 = 4p(x-h)\) put the vertex anywhere in the plane, and the five-step routine &mdash; axis from the squared variable, vertex with flipped signs, \(p\) from the coefficient divided by four, focus and directrix mirrored across the vertex, latus rectum endpoints \(2p\) either side of the focus &mdash; turns any such equation into an honest three-point sketch. When the equation arrived scrambled, completing the square unscrambled it, with one non-negotiable finishing move: factor out \(4p\) before reading the vertex. This closes the week that opened on Apollonius' cone: you have sliced the family, mastered the circle, and built the parabola twice &mdash; from its locus and now on the full plane. But one question has been waiting since Kepler named the focus a <em>hearth</em>: what actually happens at that point? Next lesson, the answer &mdash; a proof that every ray arriving parallel to the axis reflects off the parabola straight into the focus, and with it the satellite dish, the headlight, and the radio telescope. The curve is about to start serving.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. How do you read a parabola's entire anatomy &mdash; axis, vertex, \(p\), focus, directrix, width &mdash; from a standard-form equation in a single pass?</p>
+    <p>2. Why must \(4p\) be factored out completely before the vertex can be read, and what kind of error does skipping that step produce?</p>
+    <p>3. What exactly do the latus rectum's endpoints pin down, and why does a sketch through vertex-plus-endpoints deserve to be called honest?</p>
+    <p>4. Galileo's cannonballs and Apollonius' cone produce the same curve. What would it take to convince a skeptic that the projectile's arc really is a conic section and not merely a look-alike?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-4 &middot; Graphing Parabolas</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

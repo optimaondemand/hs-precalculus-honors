@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Review Activity</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Semester 1</div>
+        <div style="font-size: 13px; color: #666;">Finals Week</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">S1 Review</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Paired Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42; font-style: italic;">Semester 1 Review: One Semester, One Story</div>
+        <div style="font-size: 13px; color: #666;">&#11088; Finals Week Review Activity</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Points</div>
+        <div style="font-size: 16px; color: #0e1c42;">Assignment</div>
+        <div style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 14px; padding: 3px 12px; border-radius: 10px; margin-top: 6px;">16 pts</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">Semester 1 Finals Week</div>
+        <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Review Activity: Mixed Set &amp; the Function Family Field Guide</div>
+        <div style="font-size: 15px; color: #666;">Assignment &middot; 16 pts &middot; Focus-style (teacher-graded on the two method problems)</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128203; ASSIGNMENT OVERVIEW</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">This is finals week's <strong>review activity</strong> &mdash; your dress rehearsal for the Semester 1 final, in two parts. <strong>Part A</strong> is a mixed problem set that ranges across all five units with no unit labels attached: recognizing which tool a problem wants is itself the skill being rehearsed. <strong>Part B</strong> is the one-page, hand-drawn <strong>Function Family Field Guide</strong> &mdash; the semester's families gathered onto a single sheet you will wish you could bring to the final (you cannot; making it puts it where you <em>can</em> bring it). The two gold-badged <strong>&#11088; METHOD PROBLEMS</strong> are the ones your teacher grades for method: one guard-and-judge trial from Unit 3's discipline, and one full inverse construction proved by composition. Give every problem honest work, and give the method problems the complete procedure with nothing skipped because it felt obvious.</div>
+    </div>
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 6px; padding: 16px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 10px;">&#127919; FOCUS QUESTION</div>
+        <div style="font-size: 20px; color: #0e1c42; font-style: italic; line-height: 1.6;">Stripped of its unit label, how does a problem tell you which of the semester's tools it needs &mdash; and which of the standing disciplines must ride along with that tool?</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #0E1C42;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; PART A &mdash; MIXED PROBLEM SET (all five units, no labels)</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">Show your work for every problem in neat vertical form &mdash; one step per line, equals signs aligned, final answers labeled. Draw graphs large, with anchor points labeled. Exact values before decimals, throughout.</p>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">1</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Two sums:</strong> &#9312; Evaluate \(\displaystyle\sum_{k=1}^{40}(3k + 1)\), naming the family and the formula before using it. &#9313; Decide whether \(18 + 12 + 8 + \cdots\) converges; if it does, check the license and compute the exact sum.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">2</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>The full zero hunt:</strong> Find all zeros of \(f(x) = x^3 - 4x^2 + x + 6\) by the complete method &mdash; candidate list, a successful synthetic division shown, the factored finish &mdash; and write the complete factorization.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">3</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Rational anatomy:</strong> For \(f(x) = \dfrac{2x^2 - 8}{x^2 - x - 6}\): factor completely, then state the domain, the coordinates of the hole, every vertical asymptote, the horizontal asymptote, and both intercepts &mdash; each feature traced to its factor. (One removable ghost and one true wall live in this denominator; tell them apart.)</div>
+        </div>
+
+        <div style="border: 2px solid #C7922C; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; background: #FFFDF7;">
+            <div style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 12px; padding: 3px 12px; border-radius: 10px; margin-bottom: 10px;">&#11088; METHOD PROBLEM &mdash; your teacher grades this one for method</div>
+            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">4</div>
+                <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Solve \(\log_2 x + \log_2(x - 6) = 4\) with the complete guard-and-judge discipline, every step labeled: &#9312; <strong>post the guards</strong> &mdash; every domain condition with its reason, combined into one final guard; &#9313; <strong>solve</strong> &mdash; condense, convert to exponential form, and solve the quadratic with every factoring step shown; &#9314; <strong>judge each candidate</strong> against the <em>original</em> equation, arithmetic shown; &#9315; <strong>verdict sentence</strong> &mdash; name the extraneous candidate and state precisely where it was manufactured: which step enlarged the equation's domain, and why does the ghost satisfy the condensed equation but not the original?</div>
+            </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">5</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Same growth, two languages:</strong> A car bought for \$32,000 loses 25% of its value each year. &#9312; Write the year-end values for the first four years and show they form a geometric sequence, naming \(r\). &#9313; Write the continuous model \(V(t)\) and confirm \(V(4)\) matches your fourth year-end value exactly. &#9314; Find when the car is worth half its purchase price &mdash; exact form first (a ratio of logarithms), then a decimal to two places.</div>
+        </div>
+
+        <div style="border: 2px solid #C7922C; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; background: #FFFDF7;">
+            <div style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 12px; padding: 3px 12px; border-radius: 10px; margin-bottom: 10px;">&#11088; METHOD PROBLEM &mdash; your teacher grades this one for method</div>
+            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">6</div>
+                <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Complete inverse construction for \(f(x) = \sqrt{x - 2} + 3\): &#9312; state the domain and range of \(f\), each justified; &#9313; <strong>find \(f^{-1}\) by swap-and-solve</strong>, posting the guard before you square and resolving it in writing; &#9314; state the domain and range of \(f^{-1}\) and note the swap; &#9315; <strong>prove the pair</strong> by computing <em>both</em> compositions \(f\!\left(f^{-1}(x)\right)\) and \(f^{-1}\!\left(f(x)\right)\) and simplifying each to \(x\) &mdash; every algebraic step written, the absolute-value moment handled honestly against the declared domain; &#9316; verify with the point \(f(6) = 5\), both directions; &#9317; one closing sentence: which Unit 3 function is <em>defined</em> as an inverse in exactly this way?</div>
+            </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">7</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>The master key:</strong> Classify and convert \(4x^2 + y^2 + 8x - 6y - 3 = 0\) to standard form by completing the square &mdash; both squares shown in full &mdash; then state the center, vertices, foci, and eccentricity of the resulting conic, each with the computation that produced it.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">8</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Explain why:</strong> In three or four sentences, explain why a geometric sequence <em>is</em> an exponential function sampled at the counting numbers. Write \(a_n = a_1 r^{\,n-1}\) and \(f(x) = a b^x\) side by side, state exactly how \(r\) and \(b\) correspond, and name one question the continuous function can answer that the sequence cannot. (The semester's headline thread, retold in your voice &mdash; not copied from the review lesson.)</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">9</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Honors stretch (three units at once):</strong> For which values of \(k\) does the line \(y = x + k\) meet the ellipse \(\dfrac{x^2}{8} + \dfrac{y^2}{2} = 1\) in exactly one point? Substitute, clear the fractions, and let the discriminant of the resulting quadratic carry the argument &mdash; all three cases (two meetings, one, none) told as an inequality story in \(k\). For the positive tangency value, find the point of tangency exactly and verify it lies on <em>both</em> graphs. Close with one sentence naming the three units this problem walked through.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #C7922C;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128209; PART B &mdash; THE FUNCTION FAMILY FIELD GUIDE (one hand-drawn page)</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <p style="margin-top: 0;">On <strong>one single page</strong>, build a naturalist's field guide to every family of functions and relations you met this semester. Rule it as a chart &mdash; one row per family, four columns &mdash; drawn and lettered by hand. A field guide is meant for identification at a glance in the wild, so keep every entry compact and honest.</p>
+            <p><strong>The rows (eight):</strong> linear &middot; polynomial (degree \(\geq 2\)) &middot; rational &middot; exponential &middot; logarithmic &middot; radical (even index) &middot; piecewise &middot; the conic relations (circle, ellipse, parabola, hyperbola &mdash; one row, four thumbnail shapes, and a note on why most of them are not functions at all).</p>
+            <p><strong>The columns (four):</strong></p>
+            <ul>
+                <li><strong>Shape</strong> &mdash; a small, characteristic sketch: asymptotes dashed, launch points and intercepts dotted deliberately.</li>
+                <li><strong>Domain</strong> &mdash; in interval notation, with a word on what restricts it (a denominator, an even index, a logarithm's argument, a border).</li>
+                <li><strong>Long-run behavior</strong> &mdash; what the family commits to as \(x \to \pm\infty\): end behavior, asymptote, or (for the conics) the bounded or unbounded verdict.</li>
+                <li><strong>Where the model can be trusted</strong> &mdash; one honest sentence per row: the kind of real situation this family models faithfully, and where its domain of honesty tends to end.</li>
+            </ul>
+            <p style="margin-bottom: 0;">This page is Part B of your PDF &mdash; and the single best study artifact you will carry into the final. Make it the page you would want back.</p>
+        </div>
+    </div>
+
+    <div style="background: #EEF1F8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#9989; SUCCESS CRITERIA</div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">I attempted every problem in Part A, including the honors stretch, with visible work &mdash; and my Field Guide fills one page with all eight rows and all four columns.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">On the two method problems, the full discipline appears in order &mdash; guards with reasons, every step of algebra shown, every candidate judged against the original, both compositions run to completion, verdicts in sentences.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">Graphs and sketches are large and labeled; domains in interval notation; exact values kept before decimals throughout.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">Where I got stuck, I named the gap honestly on the page instead of leaving a blank or bluffing &mdash; and flagged it as a study target before the final.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; overflow-x: auto;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128202; GRADING RUBRIC</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">Your teacher applies this rubric to the two &#11088; method problems (the rest of the set and the Field Guide are checked for honest completion). This same four-criterion standard governs every hand-graded item in this course, all year &mdash; including next week's final.</p>
+        <table style="width: 100%; border-collapse: collapse; min-width: 580px;">
+            <thead>
+                <tr style="background: #0E1C42;">
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">Criteria</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">Excellent (4)</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">Proficient (3)</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">Developing (2)</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">Beginning (1)</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: center; border: 1px solid #334;">Pts</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="background: #FFFFFF;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; width: 140px; vertical-align: top;">Understanding of the material<br /><span style="font-size: 12px; color: #777;">4 pts</span></td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Method fits the problem exactly; definitions, notation, and results are used correctly throughout.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Method is sound with a minor conceptual slip that does not derail the solution.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Partial grasp; the approach starts correctly but loses the thread.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">The method does not match the mathematics being asked.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">4 pts</td>
+                </tr>
+                <tr style="background: #F4F6FA;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Quality of reasoning<br /><span style="font-size: 12px; color: #777;">4 pts</span></td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Every step follows from the last; the <em>why</em> is stated, and verification is actually performed.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Reasoning is mostly explicit; one link in the chain is asserted rather than shown.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Steps are present but read as recipe-following; explanations restate <em>what</em> without <em>why</em>.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Answer appears with little or no supporting reasoning.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">4 pts</td>
+                </tr>
+                <tr style="background: #FFFFFF;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Presentation &amp; precision<br /><span style="font-size: 12px; color: #777;">4 pts</span></td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Clean vertical layout, aligned equals signs, labeled answers, exact values; graphs read as visual arguments.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Organized and legible with small lapses in labeling or alignment.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Readable but disorderly; the grader must hunt for the thread.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Work is scattered or illegible; steps cannot be followed.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">4 pts</td>
+                </tr>
+                <tr style="background: #F4F6FA;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Intellectual honesty<br /><span style="font-size: 12px; color: #777;">4 pts</span></td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">All work shown faithfully as done; uncertainty and gaps are named plainly; nothing is dressed up.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Work is genuine; one rough patch is smoothed over rather than acknowledged.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Some steps appear reverse-engineered from the answer rather than worked.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">The page misrepresents how the work was actually done.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">4 pts</td>
+                </tr>
+                <tr style="background: #0E1C42;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #ffffff; border: 1px solid #55C8E8; text-align: right;" colspan="5">Total:</td>
+                    <td style="padding: 10px 12px; font-size: 16px; color: #55c8e8; border: 1px solid #55C8E8; text-align: center;">16 pts</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div style="background: #FDF3E3; border-left: 5px solid #C7922C; border-radius: 6px; padding: 18px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128228; SUBMISSION INSTRUCTIONS</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Canvas Assignment Name:</strong> S1 Review Activity &middot; Mixed Set &amp; the Function Family Field Guide</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;">Solve every problem by hand on paper, and draw the Field Guide on its own page. When you finish, photograph or scan your pages, combine them into <strong>one PDF</strong> with the pages in order (Part A first, Field Guide last), and upload the single file here. Name the file <strong>LastName_FirstName_Precalculus_S1Review.pdf</strong>.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Due:</strong> See the Canvas due date &mdash; before the Semester 1 final opens, so the feedback loop closes while it can still help you.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Eighteen weeks of families, disciplines, and threads &mdash; gathered onto a few honest pages in your own hand. This is what studying looks like when it is also mathematics.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin-bottom: 24px;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; OPTIONAL: CHECK YOURSELF WITH DESMOS</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">After your work is done on paper, verify what a graph can verify at <a href="https://www.desmos.com/calculator">desmos.com/calculator</a>: for problem 4, graph <strong>y = log&#8322;(x) + log&#8322;(x &minus; 6)</strong> and <strong>y = 4</strong> and confirm exactly one crossing &mdash; then look where your extraneous candidate lives and notice the curve does not even exist there. For problem 6, graph \(f\), your \(f^{-1}\), and the dashed line \(y = x\) and watch the reflection. For problem 9, put a slider on \(k\) and watch the line kiss the ellipse at your two tangency values. Every family on your Field Guide can be sketched here too, one honest check per row. The calculator confirms; your algebra convinces.</div>
+    </div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Semester 1 Finals Week</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">S1 Review Activity &middot; Mixed Set &amp; the Function Family Field Guide</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

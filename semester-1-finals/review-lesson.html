@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Review Lesson</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Semester 1</div>
+        <div style="font-size: 13px; color: #666;">Finals Week</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">S1 Review</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Functions &amp; Conics: One Story</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">Semester 1 Finals Week</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Semester 1 Review: One Semester, One Story</div>
+    <div style="font-size: 15px; color: #666;">Review Lesson &middot; No new content this week &mdash; consolidation only</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to trace the semester's five units as one connected story, naming the specific threads that tie sequences to exponentials, logarithms to inverses, and quadratics to every conic.</p></li>
+        <li><p>I will be able to solve mixed-review problems that cross unit boundaries, choosing the right tool without being told which unit it comes from.</p></li>
+        <li><p>I will be able to rehearse the semester's standing disciplines on demand &mdash; guard-and-judge, the four-line model defense, and completing the square &mdash; ready for the final.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY, REVISITED</div>
+    <p>These terms did not stay in the units where you met them. Watch how far each one traveled.</p>
+    <p><strong>Common ratio</strong>: The constant multiplier \(r\) of a geometric sequence (Unit 1) &mdash; which reappeared in Unit 3 wearing a new name: the <em>base</em> \(b\) of an exponential function. Same growth, two languages.</p>
+    <p><strong>Asymptote</strong>: A line a graph commits to in the long run. Vertical and horizontal asymptotes organized rational functions (Unit 2), a horizontal asymptote anchored every exponential and a vertical one every logarithm (Unit 3), and a crossed pair of them guided every hyperbola (Unit 5).</p>
+    <p><strong>Inverse function</strong>: The function that undoes another, verified by <em>both</em> compositions returning \(x\) (Unit 4). The logarithm (Unit 3) was an inverse before you had the word for it.</p>
+    <p><strong>Extraneous solution</strong>: A candidate manufactured by an irreversible step &mdash; clearing a denominator (Unit 2), squaring both sides (Unit 3), condensing logarithms (Unit 3), or substituting inside a conic system (Unit 5). The original equation is always the judge.</p>
+    <p><strong>Completing the square</strong>: The algebraic move that rebuilds any quadratic expression around a perfect square &mdash; the master key that unlocked the general form of the circle, the ellipse, the parabola, and the hyperbola alike (Unit 5), and located the fold of a parabola before restricting its domain (Unit 4).</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Eighteen weeks ago this course began with Fibonacci copying out a rabbit puzzle in the <em>Liber Abaci</em>, and it paused last week with Apollonius's curves riding aboard the Hubble Space Telescope. In between: Gauss pairing off the integers, Cardano dueling over cubics, Napier spending twenty years building the logarithm to spare astronomers their arithmetic, Leibniz sharpening the idea of a function, Kepler finding the planets on ellipses. It can feel like five separate countries. It is not. This week &mdash; finals week &mdash; there is no new mathematics. There is instead the work of seeing the semester as <strong>one story</strong>, because the final will hand you problems without unit labels, and the mathematician's first skill is recognizing which tool a problem is quietly asking for.</p>
+
+    <p>The week has exactly three parts: this review lesson, a paired review activity (Focus-style &mdash; your teacher method-grades its two starred problems), and the Semester 1 final. Here is the story so far, unit by unit, followed by the threads that stitch it together and three worked examples that each live in two units at once.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Unit 1 &mdash; Sequences and Series: What You Must Be Able to Do</strong></h4>
+        <ul style="margin-bottom: 0;">
+            <li>Identify a sequence's family &mdash; common difference (arithmetic), common ratio (geometric), or neither &mdash; and say how you know.</li>
+            <li>Write and convert between explicit and recursive definitions; evaluate factorial expressions by cancellation.</li>
+            <li>Read and write sigma notation; apply \(S_n = \frac{n}{2}(a_1 + a_n)\) and \(S_n = \frac{a_1(1 - r^n)}{1 - r}\) &mdash; and derive both (Gauss's pairing; multiply-and-subtract).</li>
+            <li>Test an infinite geometric series against the license \(|r| < 1\) and compute the exact sum \(S = \frac{a_1}{1 - r}\) when it converges.</li>
+            <li>Model accumulation and growth contexts, telling a <em>term</em> question from a <em>series</em> question by the wording alone.</li>
+        </ul>
+    </div>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Unit 2 &mdash; Polynomial and Rational Functions: What You Must Be Able to Do</strong></h4>
+        <ul style="margin-bottom: 0;">
+            <li>Read end behavior from the leading term alone &mdash; the truth about the long run &mdash; and connect each zero's multiplicity to cross, touch, or flatten.</li>
+            <li>Divide polynomials long and synthetically; state, prove, and apply the Remainder and Factor Theorems.</li>
+            <li>Run the full zero hunt: Rational Zero candidates, a successful division, the factored finish &mdash; with conjugate pairs when complex zeros appear.</li>
+            <li>Give a rational function's complete anatomy: domain, holes versus vertical asymptotes (both traced to factors), horizontal or slant asymptote, intercepts.</li>
+            <li>Solve rational equations and inequalities with the discipline &mdash; forbidden list posted first, every candidate judged, sign charts for inequalities.</li>
+        </ul>
+    </div>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Unit 3 &mdash; Other Functions and Their Graphs: What You Must Be Able to Do</strong></h4>
+        <ul style="margin-bottom: 0;">
+            <li>Construct an exponential function from two points or a growth story; graph it with its asymptote; use \(e\) and the compound-interest family of models.</li>
+            <li>Evaluate logarithms exactly; prove and deploy the product, quotient, and power rules; expand, condense, and change base.</li>
+            <li>Solve exponential and logarithmic equations exactly, guards posted before any condensing, every candidate judged against the original.</li>
+            <li>Graph radical functions and solve radical equations with the full guard-and-judge discipline &mdash; and explain where the ghosts come from.</li>
+            <li>Evaluate, graph, and build piecewise functions with deliberate open and closed dots at every border.</li>
+            <li>Compare functions across representations, and solve linear and nonlinear systems &mdash; verifying every ordered pair in both equations.</li>
+        </ul>
+    </div>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Unit 4 &mdash; Functional Relationships: What You Must Be Able to Do</strong></h4>
+        <ul style="margin-bottom: 0;">
+            <li>Compute and interpret average rate of change; write and completely simplify the difference quotient &mdash; the doorstep of the calculus.</li>
+            <li>Combine functions with the four operations and determine the resulting domains, every exclusion justified.</li>
+            <li>Build and evaluate compositions from formulas and tables; catch the hidden domain restriction the inner function imposes.</li>
+            <li>Find inverses by swap-and-solve; prove an inverse pair by running <em>both</em> compositions to \(x\); graph \(f\) and \(f^{-1}\) as reflections across \(y = x\).</li>
+            <li>Restrict a non-invertible function's domain at its fold (complete the square to find it) and resolve the \(\pm\) fork against the declared branch.</li>
+        </ul>
+    </div>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Unit 5 &mdash; Conics: What You Must Be Able to Do</strong></h4>
+        <ul style="margin-bottom: 0;">
+            <li>Describe how one plane slicing one double cone produces the whole family &mdash; circle, ellipse, parabola, hyperbola &mdash; and what tilt produces which.</li>
+            <li>Derive each conic from its locus definition, and read every feature (center, vertices, foci, asymptotes, directrix, eccentricity) from standard form.</li>
+            <li>Classify and convert any general second-degree equation by completing the square &mdash; the master key &mdash; predicting the type from the coefficients first.</li>
+            <li>Apply the service properties: parallel-to-point (parabola), point-to-point (ellipse), point-past-point (hyperbola) &mdash; and defend a design in four lines.</li>
+            <li>Solve conic systems exactly, judging every candidate and defending the crossing count.</li>
+        </ul>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>The Five Threads That Tie the Semester</strong></h4>
+        <p>These are the connections the final will reward you for seeing. Each one is a fact, not a slogan &mdash; and each is rehearsed in the worked examples below.</p>
+        <ul>
+            <li><strong>Geometric sequences <em>are</em> exponential functions</strong> &mdash; sampled at integers. The common ratio \(r\) of Unit 1 and the base \(b\) of Unit 3 are the same number doing the same work; the sequence answers questions at the counting numbers, the function answers them everywhere in between.</li>
+            <li><strong>Inverses &harr; logarithms.</strong> Unit 3 asked you to trust that &ldquo;the logarithm undoes the exponential&rdquo;; Unit 4 built the machinery &mdash; one-to-one functions, swap-and-solve, the composition test &mdash; that turns the trust into a theorem: \(\log_b(b^x) = x\) is Unit 4's composition test passed.</li>
+            <li><strong>Two roads point at calculus.</strong> The difference quotient (Unit 4) measures a secant slope collapsing toward a tangent; end behavior and asymptotes (Unit 2) describe where a function is headed as \(x\) runs away. Both are questions about limits &mdash; the subject waiting one course ahead.</li>
+            <li><strong>Completing the square is the master key.</strong> One move &mdash; rebuild a quadratic around a perfect square &mdash; found the vertex fold in Unit 4 and unlocked the standard form of every conic in Unit 5. Four doors, one key.</li>
+            <li><strong>Systems returned with teeth.</strong> The intersection machinery of Unit 3 &mdash; substitute, solve, verify in both equations &mdash; came back in Unit 5 to count where conics cross, with guards judging the candidates that substitution manufactures.</li>
+        </ul>
+    </div>
+
+    <p>Now the rehearsal: three worked examples, each deliberately straddling at least two units, presented exactly as your final-exam work should look.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span> <span style="font-size: 14px; color: #666;">(Unit 1 meets Units 3 and 4)</span></h4>
+    <p>A wildlife preserve counts its bison herd every three years. The counts so far: 500, 1000, 2000, 4000.</p>
+    <p>&#9312; Show the counts form a geometric sequence and write its explicit formula. &#9313; Write the continuous model \(P(t)\), with \(t\) in years, and confirm it reproduces the fourth count. &#9314; Find <em>exactly</em> when the model predicts a herd of 32,000. &#9315; Name the thread this problem walks.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; Test the ratios: \(\frac{1000}{500} = \frac{2000}{1000} = \frac{4000}{2000} = 2\). A constant ratio means geometric, with \(a_1 = 500\) and \(r = 2\):</p>
+    <p style="text-align: center;">\(a_n = 500 \cdot 2^{\,n-1}\), where \(n\) counts the censuses.</p>
+    <p>&#9313; The herd doubles every 3 years, so in \(t\) years it doubles \(t/3\) times:</p>
+    <p style="text-align: center;">\(P(t) = 500 \cdot 2^{t/3}\)</p>
+    <p>Check the fourth count, taken at \(t = 9\): \(P(9) = 500 \cdot 2^{9/3} = 500 \cdot 2^3 = 4000\) &#10003;</p>
+    <p>&#9314; Set \(P(t) = 32000\) and free the captive exponent:</p>
+    <p style="text-align: center;">\(500 \cdot 2^{t/3} = 32000\)</p>
+    <p style="text-align: center;">\(2^{t/3} = 64 = 2^6\)</p>
+    <p style="text-align: center;">\(\frac{t}{3} = 6 \;\;\Rightarrow\;\; t = 18 \text{ years}\)</p>
+    <p>No calculator needed &mdash; 64 confessed to being a power of 2. Had it not, the logarithm stood ready: the inverse function \(t(P) = 3\log_2\!\left(\frac{P}{500}\right)\) answers every &ldquo;when?&rdquo; question at once, and \(t(32000) = 3\log_2 64 = 3 \cdot 6 = 18\) &#10003; agrees.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(a_n = 500 \cdot 2^{n-1}\); \(P(t) = 500 \cdot 2^{t/3}\); the herd reaches 32,000 at \(t = 18\) years. &#9315; The thread: <strong>the sequence and the function are the same growth in two languages</strong> &mdash; the census samples the exponential at \(t = 0, 3, 6, \ldots\) &mdash; and the &ldquo;when?&rdquo; question is answered by the exponential's <em>inverse</em>, which is exactly what a logarithm is.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span> <span style="font-size: 14px; color: #666;">(Unit 2 meets Unit 4)</span></h4>
+    <p>For \(f(x) = \dfrac{2x + 3}{x - 1}\): &#9312; state both asymptotes with their reasons; &#9313; find \(f^{-1}\) by swap-and-solve; &#9314; state both asymptotes of \(f^{-1}\) and explain the exchange; &#9315; verify the pair with one composition and one point.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; Vertical asymptote at \(x = 1\): the denominator vanishes there while the numerator equals \(2(1) + 3 = 5 \neq 0\). Horizontal asymptote at \(y = 2\): the degrees match, so the long-run value is the ratio of leading coefficients, \(\frac{2}{1}\).</p>
+    <p>&#9313; Swap and solve:</p>
+    <p style="text-align: center;">\(x = \dfrac{2y + 3}{y - 1}\)</p>
+    <p style="text-align: center;">\(x(y - 1) = 2y + 3\)</p>
+    <p style="text-align: center;">\(xy - x = 2y + 3\)</p>
+    <p style="text-align: center;">\(xy - 2y = x + 3\)</p>
+    <p style="text-align: center;">\(y(x - 2) = x + 3 \;\;\Rightarrow\;\; f^{-1}(x) = \dfrac{x + 3}{x - 2}\)</p>
+    <p>&#9314; \(f^{-1}\) has vertical asymptote \(x = 2\) and horizontal asymptote \(y = 1\). <strong>The asymptotes traded places.</strong> This is no coincidence: an inverse swaps inputs with outputs, so the output \(f\) can never reach (\(y = 2\), its horizontal asymptote) becomes the input \(f^{-1}\) can never accept (\(x = 2\), its vertical asymptote) &mdash; and the forbidden input \(x = 1\) of \(f\) becomes the unreachable output \(y = 1\) of \(f^{-1}\). Unit 2's honesty about the long run and Unit 4's courtesy of mutual undoing are describing the same two lines.</p>
+    <p>&#9315; Composition test, one direction shown in full:</p>
+    <p style="text-align: center;">\(f\!\left(f^{-1}(x)\right) = \dfrac{2 \cdot \frac{x+3}{x-2} + 3}{\frac{x+3}{x-2} - 1} = \dfrac{\frac{2(x+3) + 3(x-2)}{x-2}}{\frac{(x+3) - (x-2)}{x-2}} = \dfrac{5x}{5} = x\) &#10003;</p>
+    <p>Point check: \(f(2) = \frac{7}{1} = 7\), and \(f^{-1}(7) = \frac{10}{5} = 2\) &#10003; &mdash; the pair \((2, 7)\) reflects to \((7, 2)\), exactly as \(y = x\) symmetry demands.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(f^{-1}(x) = \dfrac{x + 3}{x - 2}\); asymptotes \(x = 1, y = 2\) for \(f\) exchange into \(y = 1, x = 2\) for \(f^{-1}\) &mdash; the reflection across \(y = x\) carries every feature with it, asymptotes included.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span> <span style="font-size: 14px; color: #666;">(Unit 5 meets Units 3 and 2)</span></h4>
+    <p>A ranger station at the origin monitors everything within the circle \(x^2 + y^2 = 10\). A straight-walled canyon road follows the parabola \(y = x^2 - 4\). Find every point where the road crosses the monitoring boundary, judging all candidates and defending the count.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Guard first.</strong> The road gives \(x^2 = y + 4\), and since \(x^2 \geq 0\), any crossing must have \(y \geq -4\). Posted.</p>
+    <p><strong>Substitute</strong> \(x^2 = y + 4\) into the circle &mdash; Unit 3's machinery pointed at Unit 5's curves:</p>
+    <p style="text-align: center;">\((y + 4) + y^2 = 10\)</p>
+    <p style="text-align: center;">\(y^2 + y - 6 = 0\)</p>
+    <p style="text-align: center;">\((y + 3)(y - 2) = 0 \;\;\Rightarrow\;\; y = -3 \;\text{ or }\; y = 2\)</p>
+    <p><strong>Judge.</strong> Both candidates satisfy the guard \(y \geq -4\) &mdash; both stand. Recover the \(x\)-coordinates:</p>
+    <p style="text-align: center;">\(y = -3\): \(\; x^2 = 1 \Rightarrow x = \pm 1\) &mdash; the points \((1, -3)\) and \((-1, -3)\)</p>
+    <p style="text-align: center;">\(y = 2\): \(\; x^2 = 6 \Rightarrow x = \pm\sqrt{6}\) &mdash; the points \((\sqrt{6}, 2)\) and \((-\sqrt{6}, 2)\)</p>
+    <p><strong>Defend the count.</strong> Two conics can meet in as many as four points, and here they use their full allowance: the quadratic offered two values of \(y\), the guard convicted neither, and each surviving \(y\) yields \(x^2 > 0\) &mdash; two symmetric points apiece. Four crossings. Verify one in <em>both</em> equations: \((\sqrt 6, 2)\) gives \(6 + 4 = 10\) &#10003; on the circle and \((\sqrt6)^2 - 4 = 2\) &#10003; on the road.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The road crosses the boundary at \((\pm 1, -3)\) and \((\pm\sqrt{6}, 2)\) &mdash; four points, exact values kept. Every semester skill fired at once: a conic, a substitution, a factored quadratic, a posted guard, and a verified ordered pair. This is what the final's synthesis problems feel like.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>The Semester's Standing Disciplines &mdash; Gathered in One Place</strong></h4>
+        <p>Five phrases have followed you since September. They are not slogans; each is a method with a reason, and the final assumes all five.</p>
+        <ul>
+            <li><strong>&ldquo;The calculator confirms; your algebra convinces.&rdquo;</strong> Desmos may check any answer, but only written reasoning <em>establishes</em> one. On the final the calculator handles arithmetic; the convincing is yours.</li>
+            <li><strong>The domain of honesty.</strong> Every model &mdash; polynomial, exponential, conic &mdash; describes reality only on an interval, and an honest solver names where the model stops. A defense that hides its limits is an advertisement, not an argument.</li>
+            <li><strong>Guard-and-judge.</strong> Post the domain conditions <em>before</em> the algebra; judge every candidate against the <em>original</em> equation after. Irreversible steps &mdash; clearing denominators, squaring, condensing logs &mdash; manufacture outsiders, predictably.</li>
+            <li><strong>The four-line model defense.</strong> Claim, structure, long-run, domain of honesty &mdash; born in Unit 2's model choices, given geometric teeth in Unit 5. Any &ldquo;which model?&rdquo; question on the final deserves these four lines.</li>
+            <li><strong>Completing the square as master key.</strong> When a second-degree equation hides its identity, rebuild the squares. The center, the family, and every feature follow.</li>
+        </ul>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: The Whole Semester on One Screen</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a>, plot one ambassador from every family you have met:</p>
+        <ol>
+            <li><strong>y = 2^x</strong> and <strong>y = log&#8322;(x)</strong> (type <em>log_2(x)</em>), plus the dashed line <strong>y = x</strong>. Watch the exponential and the logarithm reflect into each other &mdash; the Unit 3&ndash;Unit 4 thread in pixels.</li>
+            <li><strong>y = x&sup3; &minus; 4x</strong> and <strong>y = (2x+3)/(x&minus;1)</strong>. Trace the polynomial's end behavior and the rational function's two asymptotes &mdash; the long run telling the truth.</li>
+            <li><strong>x&sup2; + y&sup2; = 10</strong> and <strong>y = x&sup2; &minus; 4</strong>. Count the four crossings of Example 3 and click each one &mdash; the calculator confirms what your algebra proved, radicals and all.</li>
+        </ol>
+        <p style="margin-bottom: 0;">One screen, every family, all still obeying the rules you learned to read. That screen is your semester.</p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve \(\log_3(x + 6) + \log_3 x = 3\) with the full discipline &mdash; guards, solution, judgment. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Guards: \(x + 6 > 0\) and \(x > 0\), so \(x > 0\). Condense: \(\log_3\!\left(x(x+6)\right) = 3\), so \(x^2 + 6x = 27\), giving \(x^2 + 6x - 27 = 0\), so \((x + 9)(x - 3) = 0\): candidates \(x = 3\) and \(x = -9\). Judge: \(x = 3\): \(\log_3 9 + \log_3 3 = 2 + 1 = 3\) &#10003;. \(x = -9\) violates the guard \(x > 0\) &mdash; extraneous, manufactured when condensing enlarged the domain. Solution: \(x = 3\).
+        </div>
+    </details>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>A semester ago, a function was a rule and a curve was a picture. Now a list of numbers declares its family to you; a leading term confesses a polynomial's destiny; an exponent surrenders to a logarithm you have proved; a function and its inverse walk each other home through both compositions; and one completed square opens any conic's general form. None of that was five separate subjects &mdash; it was one education in reading the truth a formula tells and refusing the lies a careless step can manufacture. The final is the semester's capstone act of intellectual honesty: one quiet sitting, notes closed, no tools but arithmetic, where you show &mdash; to your teacher and to yourself &mdash; that the mathematics is genuinely yours. Work the review activity with full method, rest well, and then write a final that a stranger could follow and a mathematician would trust. Next semester the circle you built this fall becomes a coordinate system of its own, and the story continues &mdash; in triangles, waves, and a number that took courage to imagine.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. In what precise sense is a geometric sequence &ldquo;the same growth&rdquo; as an exponential function &mdash; and what can the continuous function do that the sequence cannot?</p>
+    <p>2. Asymptotes, end behavior, and the domain of honesty all make claims about the long run. Why is the long run where a model's truthfulness is tested &mdash; and where its limits must be confessed?</p>
+    <p>3. One algebraic move &mdash; completing the square &mdash; found a parabola's fold in Unit 4 and unlocked all four conics in Unit 5. What makes a single technique a master key across so many doors?</p>
+    <p>4. The final asks you to work alone, notes closed, guards posted, every candidate judged. Why is a cumulative exam an act of intellectual honesty rather than a mere measurement?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">S1 Review &middot; Semester 1 Review: One Semester, One Story</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

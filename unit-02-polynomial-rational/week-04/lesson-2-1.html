@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 2-1</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 2</div>
+        <div style="font-size: 13px; color: #666;">Polynomial and Rational Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">2-1</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polynomial and Rational Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">2-1</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Power Functions and End Behavior</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to identify power functions and polynomial functions, and state a polynomial's degree, leading term, and leading coefficient.</p></li>
+        <li><p>I will be able to predict the end behavior of any polynomial from its leading term alone, and write that behavior in arrow notation.</p></li>
+        <li><p>I will be able to explain <em>why</em> the leading term controls the long run &mdash; why, far from the origin, every other term becomes negligible.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Power function</strong>: A function of the form \(f(x) = kx^{n}\) &mdash; a single term: a coefficient times a variable raised to a fixed power.</p>
+    <p><strong>Polynomial function</strong>: A sum of power functions with whole-number exponents: \(f(x) = a_n x^n + a_{n-1}x^{n-1} + \cdots + a_1 x + a_0\).</p>
+    <p><strong>Degree</strong>: The highest exponent \(n\) appearing in the polynomial.</p>
+    <p><strong>Leading term / leading coefficient</strong>: The term \(a_n x^n\) of highest degree, and its coefficient \(a_n\).</p>
+    <p><strong>End behavior</strong>: What the output values do as the inputs run far out to the right (\(x \to \infty\)) and far out to the left (\(x \to -\infty\)).</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>In the winter of 1535, two mathematicians met in Bologna for a public duel. Not with swords &mdash; with <em>cubic equations</em>. Each posed thirty problems; whoever solved more, won. Niccol&ograve; Tartaglia, a poor teacher with a stammer, had secretly discovered how to solve equations like \(x^3 + px = q\) &mdash; something the greatest minds of Europe had declared impossible &mdash; and he swept the contest. Years later, the physician Girolamo Cardano coaxed the secret from him under an oath of silence, then broke the oath and published it in his 1545 masterwork <em>Ars Magna</em>. The feud that followed was bitter and public, and it launched the modern study of the very functions this unit is about: <strong>polynomials</strong>.</p>
+    <p>This unit's guiding virtue is <strong>honesty</strong>, and it is not decoration &mdash; it is the mathematics. You are about to learn that a polynomial cannot lie about its long-run behavior: two numbers, visible right in its formula, tell the whole truth about where the function is ultimately headed, no matter how wildly it wiggles in between. Learning to read that truth is today's work.</p>
+    <p>We begin with the simplest citizens of the family. A <strong>power function</strong> is a single term:</p>
+    <p style="text-align: center;">\(f(x) = kx^{n}\)</p>
+    <p>You have known its members for years without the family name: \(f(x) = x^2\) (the area of a square of side \(x\)), \(f(x) = x^3\) (the volume of a cube), even \(f(x) = \frac{4}{3}\pi x^3\) (the volume of a sphere of radius \(x\) &mdash; a power function with \(k = \frac{4}{3}\pi\) and \(n = 3\)).</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Which of the following are power functions? &nbsp; &#9312; \(f(x) = 5x^{4}\) &emsp; &#9313; \(g(x) = 2^{x}\) &emsp; &#9314; \(h(x) = \dfrac{4}{3}\pi x^{3}\) &emsp; &#9315; \(p(x) = 3x^2 + 1\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; A coefficient (5) times a variable raised to a fixed power (4): a power function. &#9313; Look carefully at <em>where the variable sits</em>. In \(2^x\) the variable is the <em>exponent</em> &mdash; this is exponential growth, the kind you met in geometric sequences, not a power function. The two are profoundly different, and telling them apart matters all year. &#9314; A power function with \(k = \frac{4}{3}\pi\), \(n = 3\). &#9315; A <em>sum</em> of two terms &mdash; not a single power function, but a polynomial built from them.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> &#9312; and &#9314; are power functions; &#9313; is exponential; &#9315; is a polynomial.</p>
+
+    <p>Watch what happens when power functions grow. For even powers (\(x^2, x^4, x^6, \ldots\)), both ends of the graph rise together &mdash; a far-left input like \(x = -1000\) gets squared into something enormous and <em>positive</em>. For odd powers (\(x^3, x^5, \ldots\)), the ends go opposite ways: far-right inputs produce huge positive outputs, far-left inputs huge negative ones. We compress all of this into <strong>arrow notation</strong>:</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Arrow Notation and End Behavior of Power Functions</strong></h4>
+        <p>We write \(x \to \infty\) for &ldquo;\(x\) increases without bound&rdquo; and \(x \to -\infty\) for &ldquo;\(x\) decreases without bound.&rdquo; For \(f(x) = x^n\) with positive \(k=1\):</p>
+        <ul>
+            <li><strong>\(n\) even:</strong> \(f(x) \to \infty\) as \(x \to \infty\) <em>and</em> as \(x \to -\infty\). Both ends rise, like \(y = x^2\).</li>
+            <li><strong>\(n\) odd:</strong> \(f(x) \to \infty\) as \(x \to \infty\), but \(f(x) \to -\infty\) as \(x \to -\infty\). The ends split, like \(y = x^3\).</li>
+        </ul>
+        <p style="margin-bottom: 0;">A negative coefficient \(k\) flips every conclusion upside down &mdash; multiply by a negative and the ends trade &ldquo;up&rdquo; for &ldquo;down.&rdquo;</p>
+    </div>
+
+    <p>Now assemble power functions into a sum and you have a <strong>polynomial function</strong>:</p>
+    <p style="text-align: center;">\(f(x) = a_n x^n + a_{n-1}x^{n-1} + \cdots + a_1 x + a_0, \qquad a_n \neq 0\)</p>
+    <p>The name is honest Greek and Latin: <em>poly</em>, &ldquo;many,&rdquo; and <em>nomen</em>, &ldquo;name&rdquo; or &ldquo;term&rdquo; &mdash; a many-termed expression. The exponent \(n\) is the <strong>degree</strong>, the term \(a_n x^n\) is the <strong>leading term</strong>, and \(a_n\) is the <strong>leading coefficient</strong>. Here is the claim this whole lesson stands on: <em>in the long run, the leading term is the only term that matters.</em></p>
+    <p>That deserves evidence, not assertion. Take \(f(x) = 2x^3 - 5x^2 + x - 9\) and compare it to its leading term alone, \(g(x) = 2x^3\):</p>
+    <p style="text-align: center;">At \(x = 10\): &nbsp; \(f(10) = 2000 - 500 + 10 - 9 = 1501\), &nbsp; while \(g(10) = 2000\).</p>
+    <p style="text-align: center;">At \(x = 100\): &nbsp; \(f(100) = 2{,}000{,}000 - 50{,}000 + 100 - 9 = 1{,}950{,}091\), &nbsp; while \(g(100) = 2{,}000{,}000\).</p>
+    <p>At \(x = 10\) the lower terms drag \(f\) a full 25% below its leading term. At \(x = 100\) the gap has shrunk to about 2.5%. Push to \(x = 1000\) and it is 0.25%. The reason is structural: when \(x\) grows by a factor of 10, the cubic term grows by a factor of \(1000\), the quadratic term by only \(100\). The leading term does not merely stay ahead &mdash; it <em>pulls away</em>, relentlessly, from every term beneath it. The wiggles near the origin are the polynomial's private business; its ends are governed by the leading term alone.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: End Behavior of a Polynomial &mdash; the Four Cases</strong></h4>
+        <p>The end behavior of any polynomial matches the end behavior of its leading term \(a_n x^n\). Two questions settle everything: <em>Is the degree even or odd? Is the leading coefficient positive or negative?</em></p>
+        <ul>
+            <li><strong>Even degree, \(a_n &gt; 0\):</strong> both ends rise &nbsp;(\(\nwarrow \; \nearrow\), like \(x^2\))</li>
+            <li><strong>Even degree, \(a_n &lt; 0\):</strong> both ends fall &nbsp;(\(\swarrow \; \searrow\), like \(-x^2\))</li>
+            <li><strong>Odd degree, \(a_n &gt; 0\):</strong> falls left, rises right &nbsp;(\(\swarrow \; \nearrow\), like \(x^3\))</li>
+            <li><strong>Odd degree, \(a_n &lt; 0\):</strong> rises left, falls right &nbsp;(\(\nwarrow \; \searrow\), like \(-x^3\))</li>
+        </ul>
+        <p style="margin-bottom: 0;">This is the honesty theorem of the unit: no matter what a polynomial does in the middle, its formula's first term tells the truth about both ends &mdash; every time, with no exceptions.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Describe the end behavior of \(f(x) = -3x^{6} + 40x^{3} + 1000\) in arrow notation.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Only the leading term \(-3x^6\) speaks for the ends. The degree, 6, is even, so both ends do the same thing; the leading coefficient, \(-3\), is negative, so that same thing is <em>falling</em>. The large positive middle terms (\(+40x^3 + 1000\)) can prop the graph up near the origin, but they lose the long-run argument to \(-3x^6\) without appeal:</p>
+    <p style="text-align: center;">as \(x \to -\infty, \; f(x) \to -\infty\) &nbsp; and &nbsp; as \(x \to \infty, \; f(x) \to -\infty\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Both ends fall: \(f(x) \to -\infty\) in both directions.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>A polynomial is given in factored form: \(g(x) = -2x(x-4)(x+3)^2\). Find its degree, its leading coefficient, and its end behavior &mdash; <em>without expanding</em>.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The degree is the total count of \(x\)'s multiplied together: one from \(x\), one from \((x-4)\), two from \((x+3)^2\) &mdash; degree \(1 + 1 + 2 = 4\). The leading coefficient comes from multiplying each factor's leading piece: \(-2 \cdot x \cdot x \cdot x^2 = -2x^4\), so \(a_4 = -2\).</p>
+    <p>Even degree, negative leading coefficient: both ends fall.</p>
+    <p style="text-align: center;">as \(x \to \pm\infty, \; g(x) \to -\infty\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Degree 4, leading coefficient \(-2\), both ends falling. The factored form handed us the answer faster than expanded form would have &mdash; keep that habit; it pays again in Lesson 2-2.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Reading the degree from the <em>first term as written</em> instead of the <em>highest power present</em>. The polynomial \(f(x) = 7x^2 - x^5 + 3\) is degree <strong>5</strong> with leading coefficient <strong>\(-1\)</strong> &mdash; not degree 2 with leading coefficient 7. Polynomials are not always handed to you in descending order; mentally rewrite before you judge. (And a second trap: in \((3x)^2 = 9x^2\)-style factored forms, the coefficient gets raised to the power too.)</div>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>The graph of a polynomial rises to the left and falls to the right. What can you conclude about its degree and leading coefficient &mdash; and what can you <em>not</em> conclude?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The ends go opposite ways, so the degree is <strong>odd</strong>. Rising left and falling right is the \(-x^3\) pattern, so the leading coefficient is <strong>negative</strong>. That is everything the ends can tell us: the degree could be 3, 5, or 7; the coefficient could be \(-1\) or \(-200\). End behavior narrows a polynomial to one of the four cases &mdash; it takes the middle of the graph (Lesson 2-2) to say more.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Odd degree, negative leading coefficient; the specific degree and coefficient are not determined.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: Watching the Leading Term Win</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>Open Desmos at <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or use the window below) and stage the argument of this lesson:</p>
+        <ol>
+            <li>Line 1: type <strong>f(x) = 2x^3 - 5x^2 + x - 9</strong>.</li>
+            <li>Line 2: type <strong>g(x) = 2x^3</strong> &mdash; the leading term alone. Two visibly different curves near the origin.</li>
+            <li>Zoom out (scroll, or the &minus; button) &mdash; once, twice, five times. Watch the two graphs melt into one. By the time your window is \(-100 \le x \le 100\), you cannot tell them apart.</li>
+            <li>Now try to fool it: change \(f\) to <strong>2x^3 - 500x^2 + x - 9</strong>. Near the origin the damage is dramatic. Zoom out again &mdash; the cubic still wins. Every time.</li>
+        </ol>
+        <p style="margin-bottom: 0;">One more experiment: graph <strong>h(x) = x^4</strong> and <strong>k(x) = 2^x</strong> together and zoom out to the right. For a while the power function leads &mdash; then the exponential overtakes it and never looks back (they cross for the last time near \(x = 16\), where both equal 65,536). You proved in Unit 1 that geometric growth beats arithmetic growth; file this away as the sequel: <em>exponential growth beats polynomial growth, of any degree.</em> We will prove it in Unit 3.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: State the degree, leading coefficient, and end behavior of \(f(x) = 4 + 9x^2 - 6x^5\). Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Rewrite in descending order first: \(f(x) = -6x^5 + 9x^2 + 4\). Degree 5 (odd), leading coefficient \(-6\) (negative): rises left, falls right. As \(x \to -\infty, f(x) \to \infty\); as \(x \to \infty, f(x) \to -\infty\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Without expanding, find the degree, leading coefficient, and end behavior of \(g(x) = 5(x-1)^2(2x+3)(x+6)\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Degree: \(2 + 1 + 1 = 4\). Leading coefficient: \(5 \cdot x^2 \cdot 2x \cdot x = 10x^4\), so \(a_4 = 10\). Even degree, positive coefficient: both ends rise &mdash; as \(x \to \pm\infty, \; g(x) \to \infty\). (Note how the 2 inside \((2x+3)\) joined the product &mdash; that is the second trap from the Common Mistake box.)
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Tartaglia's real name was Niccol&ograve; Fontana. As a boy in 1512 he survived a sabre wound to the jaw during the French sack of Brescia, and the injury left him with the stammer that gave him his nickname &mdash; <em>tartaglia</em> means &ldquo;stutterer&rdquo; in Italian. He wore it as his professional name for life. The man who could not speak smoothly out-argued all of Europe on paper &mdash; a reminder that mathematics listens to reasoning, not to polish.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Today you learned the polynomial family's first law: the leading term governs the long run. Two facts you can read off any polynomial in seconds &mdash; degree even or odd, leading coefficient positive or negative &mdash; determine the fate of both ends of its graph, and nothing in the middle can overturn the verdict. That is why this unit's virtue is honesty: a polynomial's formula discloses its destiny. But the middle of the graph is where the story happens &mdash; the crossings, the turning points, the wiggles the leading term shrugs off. Tomorrow, in Lesson 2-2, you learn to read the middle: where a polynomial's graph meets the \(x\)-axis, and the surprisingly expressive ways it can do so.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What exactly makes a power function different from an exponential function, and why does the difference matter so much in the long run?</p>
+    <p>2. Why does the leading term &mdash; and only the leading term &mdash; control a polynomial's end behavior? What happens to the other terms' influence as \(x\) grows?</p>
+    <p>3. Which two features of a polynomial determine its end behavior, and what are the four possible verdicts?</p>
+    <p>4. What can a graph's end behavior tell you about its formula &mdash; and where does that information run out?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">2-1 &middot; Power Functions and End Behavior</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

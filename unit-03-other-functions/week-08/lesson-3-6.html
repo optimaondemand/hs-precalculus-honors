@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-6</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-6</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-6</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Graphs of Logarithmic Functions</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to graph logarithmic parent functions from their anchor points, with the vertical asymptote drawn dashed and labeled.</p></li>
+        <li><p>I will be able to apply shifts, stretches, and reflections to logarithmic graphs, and read off the new asymptote, domain, and range.</p></li>
+        <li><p>I will be able to find the domain of any logarithmic expression by solving the argument-positive inequality.</p></li>
+        <li><p>I will be able to explain how the exponential and logarithmic graphs mirror each other across the line \(y = x\), feature for feature.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Logarithmic parent function</strong>: \(f(x) = \log_b x\) for a legal base \(b\) &mdash; domain \((0, \infty)\), range all reals, passing through \((1, 0)\) and \((b, 1)\).</p>
+    <p><strong>Vertical asymptote</strong> <em>(returning from Unit 2 &mdash; new address)</em>: A vertical line the graph approaches without bound. Rational functions dug theirs at zeros of the denominator; the logarithm posts its own at the edge of its domain, where the argument reaches 0.</p>
+    <p><strong>Reflection across \(y = x\)</strong>: The mirror flip that swaps every point's coordinates, sending \((a, b)\) to \((b, a)\) &mdash; the geometric relationship between \(y = b^x\) and \(y = \log_b x\).</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Napier published the idea; Henry Briggs spent the rest of his life tabulating it, and his 1624 <em>Arithmetica Logarithmica</em> ran to tens of thousands of common logarithms computed to fourteen decimal places. Here is the wonder hiding in that dusty ledger: a table of values <em>is</em> a graph, read one row at a time. Briggs was plotting a curve, point by laborious point, generations before mathematicians routinely drew &ldquo;the graph of a function&rdquo; at all. Today you will draw in thirty seconds the shape he computed for years &mdash; and you will find you already know it, because you met its mirror image in Lesson 3-2.</p>
+    <p>Start where the last lesson ended: \(\log_b x\) answers the question \(b^y = x\). So the pairs that satisfy \(y = \log_2 x\) are exactly the pairs of \(y = 2^x\) <em>with the coordinates swapped</em>. The exponential owns \((1, 2)\), so the logarithm owns \((2, 1)\); the exponential owns \((3, 8)\), so the logarithm owns \((8, 3)\). Geometrically, swapping coordinates reflects a point across the line \(y = x\) &mdash; and a whole curve of swapped points is the whole curve, reflected. Build the parent \(y = \log_2 x\) honestly from its anchors:</p>
+    <p style="text-align: center;">\(\left(\tfrac{1}{2}, -1\right), \qquad (1, 0), \qquad (2, 1), \qquad (4, 2)\)</p>
+    <p>Check each against the exponent question: \(2^{-1} = \frac{1}{2}\), \(2^0 = 1\), \(2^1 = 2\), \(2^2 = 4\) &#10003;. Now watch the left end. To push the output down to \(-2, -3, -4, \ldots\) the input must fall to \(\frac{1}{4}, \frac{1}{8}, \frac{1}{16}, \ldots\) &mdash; the curve dives as \(x\) slips toward 0, and it can never touch \(x = 0\) itself, because \(\log_2 0\) does not exist. The exponential's <em>horizontal</em> asymptote \(y = 0\) has passed the torch: reflected across \(y = x\), it becomes the logarithm's <strong>vertical asymptote</strong>, the \(y\)-axis. Unit 2's asymptote discipline &mdash; dashed line, labeled equation &mdash; applies at the new address unchanged.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Mirror Inventory: Everything the Exponential Owns, the Log Owns Reflected</strong></h4>
+        <p>For \(y = b^x\) and \(y = \log_b x\) with \(b &gt; 1\):</p>
+        <ul>
+            <li><strong>Domain &harr; Range:</strong> the exponential's domain (all reals) is the log's range; the exponential's range \((0, \infty)\) is the log's domain. The mirror swaps the axes' jobs.</li>
+            <li><strong>Asymptote:</strong> the exponential's horizontal asymptote \(y = 0\) reflects to the log's vertical asymptote \(x = 0\).</li>
+            <li><strong>Intercept swap:</strong> the exponential's \(y\)-intercept \((0, 1)\) reflects to the log's \(x\)-intercept \((1, 0)\); the exponential's \((1, b)\) reflects to the log's \((b, 1)\).</li>
+            <li><strong>Growth temperament:</strong> the exponential rises ever faster; its mirror rises ever <em>slower</em>. Both increase forever &mdash; the log merely takes its time.</li>
+        </ul>
+        <p style="margin-bottom: 0;">One reflection, four inheritances. If you ever forget a fact about the logarithm's graph, reflect the exponential fact you do remember.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Graph the parent \(f(x) = \log_2 x\) from its anchor points, and state its domain, range, and asymptote.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Plot the anchors \(\left(\frac{1}{2}, -1\right)\), \((1, 0)\), \((2, 1)\), \((4, 2)\), each certified by the exponent question. Draw the \(y\)-axis's ghost: a dashed vertical line at \(x = 0\), labeled. The curve dives along the asymptote at the left, crosses the \(x\)-axis at \((1, 0)\), and climbs &mdash; ever more slowly, never leveling &mdash; through \((2, 1)\) and \((4, 2)\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Domain \((0, \infty)\); range all real numbers; vertical asymptote \(x = 0\). The parent exponential's whole biography, read in the mirror.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Graph \(f(x) = \log_2(x - 3) + 1\), and state its vertical asymptote, domain, and range.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>This is the parent shifted <strong>right 3</strong> and <strong>up 1</strong> &mdash; the same transformation language you have used all course, applying to this family without modification. Everything the parent owns moves with it. The asymptote \(x = 0\) slides to \(x = 3\); the domain slides to \((3, \infty)\); the range, all reals, is unbothered by shifts. Slide the anchors: \((1, 0) \to (4, 1)\), \((2, 1) \to (5, 2)\), \((4, 2) \to (7, 3)\). Certify each in the formula:</p>
+    <p style="text-align: center;">\(f(4) = \log_2 1 + 1 = 0 + 1 = 1 \; \checkmark \qquad f(5) = \log_2 2 + 1 = 2 \; \checkmark \qquad f(7) = \log_2 4 + 1 = 3 \; \checkmark\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Vertical asymptote \(x = 3\); domain \((3, \infty)\); range all real numbers &mdash; with the graph diving along \(x = 3\) and climbing through the three verified anchors.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Find the domain of \(g(x) = \log(5 - 2x)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The argument must be positive &mdash; that is the guard, posted first:</p>
+    <p style="text-align: center;">\(5 - 2x &gt; 0\)</p>
+    <p style="text-align: center;">\(-2x &gt; -5\)</p>
+    <p style="text-align: center;">\(x &lt; \dfrac{5}{2}\) &nbsp;&nbsp;<em>(dividing by \(-2\) flips the inequality)</em></p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Domain \(\left(-\infty, \frac{5}{2}\right)\), with vertical asymptote \(x = \frac{5}{2}\). Spot-check one value on each side: \(g(0) = \log 5\) exists &#10003;; \(g(3) = \log(-1)\) does not &#10003;. The negative coefficient also reflects the graph &mdash; this logarithm opens <em>leftward</em>, diving along its asymptote from the left.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A logarithmic graph has a dashed vertical asymptote at \(x = -2\) and passes through \((-1, 0)\), \((0, 1)\), and \((2, 2)\). Write its equation.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The asymptote sits 2 units left of the parent's, so the argument is \(x + 2\): try \(y = \log_b(x + 2)\). The point \((-1, 0)\) obliges any base: \(\log_b 1 = 0\) &#10003;. Now let \((0, 1)\) choose the base: \(\log_b 2 = 1\) forces \(b = 2\). Judge the third point, which took no part in the fitting:</p>
+    <p style="text-align: center;">\(\log_2(2 + 2) = \log_2 4 = 2 \; \checkmark\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(y = \log_2(x + 2)\). Note the craft: two points determined the equation, and the <em>third</em> point &mdash; unused, unsuborned &mdash; delivered the verdict on it.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: Watching the Mirror Work</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), put the reflection on screen:</p>
+        <ol>
+            <li>Graph <strong>y = 2^x</strong>, then <strong>y = log_2(x)</strong> &mdash; type <em>log</em>, then an underscore, and Desmos drops you into the base slot &mdash; then the mirror itself, <strong>y = x</strong>.</li>
+            <li>Zoom so the window is square (equal scales on both axes &mdash; drag or use the wrench; a stretched window bends the mirror and hides the symmetry).</li>
+            <li>Click the exponential at \((2, 4)\); now click the logarithm at \((4, 2)\). Coordinates swapped &mdash; one point reflected across \(y = x\). Find one more mirror pair yourself, and check the pair \((0,1) \leftrightarrow (1,0)\), the intercept swap from the concept box.</li>
+            <li>Follow the log rightward. It leaves the top of any window you set &mdash; slowly, but it leaves. Now add <strong>y = log_2(x - 3) + 1</strong> from Example 2 and watch the whole apparatus &mdash; asymptote, anchors, dive &mdash; slide right 3 and up 1, exactly as the algebra promised.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Graph \(g(x) = \log_3(x + 1) - 2\): state the vertical asymptote and domain, and find three anchor points by sliding the parent's. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Parent \(\log_3 x\) shifted left 1, down 2. Vertical asymptote \(x = -1\); domain \((-1, \infty)\); range all reals. Anchors: \((1, 0) \to (0, -2)\), \((3, 1) \to (2, -1)\), \((9, 2) \to (8, 0)\). Certify: \(g(0) = \log_3 1 - 2 = -2\) &#10003;, \(g(2) = \log_3 3 - 2 = -1\) &#10003;, \(g(8) = \log_3 9 - 2 = 0\) &#10003;.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Find the domain and vertical asymptote of \(h(x) = \log_2(6 - x)\), and say which direction the graph opens.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Guard: \(6 - x &gt; 0\), so \(x &lt; 6\) &mdash; domain \((-\infty, 6)\), vertical asymptote \(x = 6\). The negative coefficient on \(x\) reflects the graph: it opens leftward, diving along \(x = 6\) and climbing slowly toward the left. Check: \(h(4) = \log_2 2 = 1\) exists &#10003;; \(h(7) = \log_2(-1)\) does not &#10003;.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Two traps tonight. <strong>First, the flipped sign:</strong> solving \(5 - 2x &gt; 0\) requires dividing by \(-2\), and the inequality flips &mdash; forget that, and you will report the domain on the wrong side of the asymptote. Spot-check one value from your claimed domain in the original argument; if it comes out negative, you flipped wrong. <strong>Second, the imaginary ceiling:</strong> the logarithmic graph looks like it is leveling off, and it is not. It has <em>no horizontal asymptote</em> &mdash; slow is not stopped. Claim a ceiling and the function will exceed it; see the box below for how far you would have to walk to watch it happen.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">How slowly does \(y = \log_2 x\) climb? It reaches \(y = 100\) only when \(x = 2^{100} \approx 1.27 \times 10^{30}\) &mdash; a 31-digit number, roughly a million trillion trillion. And yet it <em>does</em> reach 100, and 1000, and every height ever named, because \(2^y\) has an answer for each one. The exponential's honesty about the long run &mdash; Unit 2's virtue &mdash; has a mirror image: the logarithm never lies about leveling off, because it never levels off. Patience without limit, in the shape of a curve.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The logarithm's graph is the exponential's graph reflected across \(y = x\): domain and range trade places, the horizontal asymptote turns vertical, the intercepts swap seats, and runaway growth becomes unhurried &mdash; but unbounded &mdash; climbing. You graphed the parents from anchor points, slid them with the same transformation grammar the whole course speaks, found domains by posting the argument-positive guard, and fitted an equation to a graph with an unused point standing as judge. So far, though, you can only <em>state</em> logarithms; you cannot yet <em>compute with</em> them. Tomorrow that changes: three rules &mdash; product, quotient, power &mdash; that convert multiplication into addition, division into subtraction, and powers into multiples. They are the engine inside Napier's tables, the reason a slide rule works, and the machinery that ran the world's arithmetic for 350 years. Tomorrow is this week's Focus material: bring your proof-writing hand.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does reflecting \(y = b^x\) across the line \(y = x\) produce exactly the graph of \(y = \log_b x\), point for point?</p>
+    <p>2. Where does a transformed logarithm's vertical asymptote come from, and why does the domain always begin exactly there?</p>
+    <p>3. The logarithm increases forever yet has no horizontal asymptote &mdash; how can both be true, and how would you convince a skeptic who trusts the picture?</p>
+    <p>4. Which features of a logarithmic graph can Desmos display convincingly, and which &mdash; the asymptote's exact location, the absence of a ceiling &mdash; must the algebra certify?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-6 &middot; Graphs of Logarithmic Functions</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-13</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-13</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-13</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Comparing Functions Across Representations</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to extract the key features of a function &mdash; intercepts, rate of change, end behavior, domain and range &mdash; from any of its four representations: equation, graph, table, or verbal description.</p></li>
+        <li><p>I will be able to compare two functions given in <em>different</em> representations and defend, with evidence, which one leads on a given interval and which one wins the long run.</p></li>
+        <li><p>I will be able to compute and interpret the average rate of change of a function between two inputs, whatever costume the function arrives in.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Representation</strong>: A way of presenting a function &mdash; an equation, a graph, a table of values, or a verbal description. Four costumes, one function; each reveals some features easily and hides others well.</p>
+    <p><strong>Key features</strong>: The facts that identify a function's behavior: intercepts, domain and range, intervals of increase and decrease, extrema, asymptotes, and end behavior. Comparing functions means comparing features, not staring at formulas.</p>
+    <p><strong>Average rate of change</strong>: The change in output per unit change in input across an interval: \(\dfrac{f(b) - f(a)}{b - a}\). Geometrically, the slope of the line through \((a, f(a))\) and \((b, f(b))\). It is the fair way to compare growth between two checkpoints.</p>
+    <p><strong>End behavior</strong>: What a function's outputs do as the inputs run off to \(\infty\) or \(-\infty\). In Unit 2 this was the polynomial's honest testimony about the long run; this week it referees every duel between families.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>For most of mathematical history, a function did not wear a graph. When John Napier published his logarithms in 1614, he delivered them as ninety pages of <em>tables</em> &mdash; column after column of hand-computed values, twenty years in the making &mdash; because the coordinate plane had not been invented yet. Ren&eacute; Descartes would not marry algebra to geometry until 1637. For centuries, navigators, astronomers, and engineers knew their functions the way you know a bus schedule: as tables, read and trusted daily. The graph, the equation, the table, and the plain-language description are four costumes for the same idea, and a precalculus student must be able to recognize a function in any of them &mdash; because the world will not always hand you the costume you prefer. Data arrives as tables. Physics arrives as equations. News arrives as descriptions. Sensors arrive as graphs. Today's skill is reading them all, and comparing across them.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Four Costumes, One Checklist</strong></h4>
+        <p>Whatever the costume, the comparison runs down the same checklist of key features:</p>
+        <ul>
+            <li><strong>Intercepts</strong> &mdash; where does each function start (\(y\)-intercept) and where does it cross zero (\(x\)-intercepts)?</li>
+            <li><strong>Rate of change</strong> &mdash; constant (linear), constant <em>percent</em> (exponential), or changing? Compute the average rate of change \(\frac{f(b)-f(a)}{b-a}\) on a shared interval for a fair race.</li>
+            <li><strong>End behavior and asymptotes</strong> &mdash; who wins the long run, and is anyone fenced in by an asymptote?</li>
+            <li><strong>Domain and range</strong> &mdash; where is each function even defined, and what outputs can it reach?</li>
+        </ul>
+        <p style="margin-bottom: 0;">Each costume has a specialty. Equations compute anything but show nothing. Graphs show shape instantly but read values approximately. Tables give exact values but only at the inputs sampled. Descriptions carry meaning and units but no precision. <strong>Translate toward whatever costume answers your question</strong> &mdash; and remember which facts your source can and cannot certify.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>The function \(f(x) = 4x + 1\) is given by its equation. A second function \(g\) arrives as a table:</p>
+    <p style="text-align: center;">\(\begin{array}{c|c|c|c|c|c} x & 0 & 1 & 2 & 3 & 4 \\ \hline g(x) & 1 & 2 & 4 & 8 & 16 \end{array}\)</p>
+    <p>Compare their \(y\)-intercepts, their average rates of change on \([0, 4]\), and their long-run behavior.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Identify the family first.</strong> The table's outputs double at every step &mdash; a constant <em>ratio</em> of 2 &mdash; so \(g\) is exponential: \(g(x) = 2^x\) (and indeed \(2^0 = 1\), \(2^3 = 8\) &#10003;). This is Unit 1's old friend in a new costume: a geometric sequence is an exponential function sampled at the integers.</p>
+    <p><strong>Intercepts.</strong> \(f(0) = 1\) and \(g(0) = 1\) &mdash; they start together, at the same point \((0, 1)\).</p>
+    <p><strong>Average rate of change on \([0,4]\).</strong></p>
+    <p style="text-align: center;">\(f: \; \dfrac{f(4) - f(0)}{4 - 0} = \dfrac{17 - 1}{4} = 4 \qquad\quad g: \; \dfrac{g(4) - g(0)}{4 - 0} = \dfrac{16 - 1}{4} = 3.75\)</p>
+    <p>On this interval the <em>linear</em> function grows faster on average &mdash; and in fact \(f(4) = 17 > 16 = g(4)\), so \(f\) still leads at \(x = 4\).</p>
+    <p><strong>Long run.</strong> But check \(x = 5\): \(f(5) = 21\), \(g(5) = 32\). And \(x = 6\): \(25\) against \(64\). Somewhere between \(x = 4\) and \(x = 5\) the exponential passed the line, and it never looks back &mdash; each step \(f\) adds 4 while \(g\) <em>doubles</em>.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Same \(y\)-intercept; the line wins the early race (average rate 4 versus 3.75 on \([0,4]\)); the exponential wins the long run, overtaking between \(x = 4\) and \(x = 5\) (Desmos puts the crossing at \(x \approx 4.13\)). Moral: <strong>&ldquo;leading now&rdquo; and &ldquo;winning eventually&rdquo; are different claims, certified by different features</strong> &mdash; values testify to the present, end behavior to the future.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Two used-car pricing models for the same $24{,}000 car. Model L arrives as a table; Model E arrives as a description: <em>&ldquo;the car loses 15% of its value each year.&rdquo;</em></p>
+    <p style="text-align: center;">\(\begin{array}{c|c|c|c|c|c|c} t \text{ (yr)} & 0 & 1 & 2 & 3 & 4 & 5 \\ \hline L(t) \text{ (\$)} & 24000 & 21200 & 18400 & 15600 & 12800 & 10000 \end{array}\)</p>
+    <p>Compare the models: first-year loss, value at year 5, and which model is more honest about a real car.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Families.</strong> \(L\) drops by a constant \(\$2800\) each year &mdash; linear: \(L(t) = 24000 - 2800t\). The description gives a constant <em>percent</em> loss &mdash; exponential decay: \(E(t) = 24000(0.85)^t\).</p>
+    <p><strong>First-year loss.</strong> \(E\) loses \(0.15 \times 24000 = \$3600\) in year one &mdash; <em>more</em> than \(L\)'s \(\$2800\). The percentage model bleeds faster early, because 15% of a big number is a big number.</p>
+    <p><strong>Year 5.</strong> \(L(5) = \$10{,}000\) from the table. For \(E\): \(0.85^5 = 0.4437\ldots\), so \(E(5) = 24000(0.4437) \approx \$10{,}648.93\). The exponential car is now worth <em>more</em> &mdash; 15% of a shrinking number shrinks too, so the decay gentles with time. The lead changed hands between years 4 and 5 (check: \(E(4) \approx \$12{,}528 < \$12{,}800 = L(4)\); Desmos puts the crossing at \(t \approx 4.3\)).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Equal at \(t=0\); the linear model holds more value through year 4; the exponential model is worth more from year 5 onward. And honesty favors \(E\): the linear model predicts a <em>negative</em> price after \(t = \frac{24000}{2800} \approx 8.6\) years &mdash; an absurdity &mdash; while \(E\) decays toward its asymptote at \(0\) and never speaks nonsense. The linear model's <strong>domain of honesty</strong> ends years before the exponential's does.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>An equation meets a graph. \(f(x) = \log_2 x\) is given by its equation; \(g\) is given by its graph &mdash; a curve launching from the origin, rising through \((1, 1)\), \((4, 2)\), and \((9, 3)\), steep at first and ever-flattening. Identify \(g\), compare domains and intercepts, and settle the duel: who is larger where?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Identify.</strong> Launch point at the origin, anchor points \((1,1), (4,2), (9,3)\) &mdash; that is the square-root parent from Lesson 3-10: \(g(x) = \sqrt{x}\).</p>
+    <p><strong>Domains and intercepts.</strong> \(f\) demands \(x > 0\) (domain \((0, \infty)\), vertical asymptote at \(x = 0\), \(x\)-intercept at \(1\)); \(g\) allows \(x = 0\) (domain \([0, \infty)\), intercept at the origin, no asymptote). Both increase forever; both are concave down; both are slow. But slow and slow are not the same slow.</p>
+    <p><strong>The duel.</strong> Test values, exactly:</p>
+    <p style="text-align: center;">\(x = 4: \;\; \log_2 4 = 2 \;\;\text{and}\;\; \sqrt{4} = 2 \;\; \text{&mdash; a tie.}\)</p>
+    <p style="text-align: center;">\(x = 8: \;\; \log_2 8 = 3 \;\;\text{and}\;\; \sqrt{8} \approx 2.83 \;\; \text{&mdash; the log leads.}\)</p>
+    <p style="text-align: center;">\(x = 16: \;\; \log_2 16 = 4 \;\;\text{and}\;\; \sqrt{16} = 4 \;\; \text{&mdash; a tie again.}\)</p>
+    <p style="text-align: center;">\(x = 25: \;\; \log_2 25 \approx 4.64 \;\;\text{and}\;\; \sqrt{25} = 5 \;\; \text{&mdash; the root leads, forever after.}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> They cross <em>twice</em>, at \(x = 4\) and \(x = 16\) exactly. The root leads on \((0,4)\) (check \(x = 2\): \(\sqrt{2} \approx 1.41 > 1 = \log_2 2\)), the logarithm sneaks ahead on \((4, 16)\), and the root wins the long run &mdash; from \(x = 16\) on, permanently. This is a general law worth wonder: <strong>every positive power of \(x\), however small, eventually beats every logarithm</strong> &mdash; the log is the slowest climber in the entire menagerie, which is exactly why Napier built it: it compresses enormous ranges into small ones.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Two tables walk in. Classify each, write its rule, and state who leads when.</p>
+    <p style="text-align: center;">\(\begin{array}{c|c|c|c|c} n & 0 & 1 & 2 & 3 \\ \hline A(n) & 5 & 8 & 11 & 14 \end{array} \qquad\qquad \begin{array}{c|c|c|c|c} n & 0 & 1 & 2 & 3 \\ \hline B(n) & 5 & 10 & 20 & 40 \end{array}\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Diagnose by differences and ratios.</strong> \(A\)'s consecutive <em>differences</em> are constant (\(+3\) each step): linear, \(A(n) = 5 + 3n\). \(B\)'s consecutive <em>ratios</em> are constant (\(\times 2\) each step): exponential, \(B(n) = 5 \cdot 2^n\). This is the diagnostic from Unit 1, and it is the single most useful table-reading skill you own: <strong>differences test for lines; ratios test for exponentials.</strong></p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Tied at \(n = 0\); \(B\) leads from \(n = 1\) onward (\(10 > 8\)) and the gap doubles its scale every step. When both start together, the exponential concedes the starting line and nothing else.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Every Costume on One Screen</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), replay Example 1 with all the costumes at once:</p>
+        <ol>
+            <li>Click the <strong>+</strong> button and choose <strong>table</strong>. Enter \(g\)'s five rows from Example 1. The dots appear &mdash; the table costume.</li>
+            <li>Type <strong>f(x) = 4x + 1</strong>. The line appears &mdash; the equation costume, drawn as the graph costume.</li>
+            <li>Now guess \(g\)'s equation: type <strong>g(x) = 2^x</strong> and watch the curve thread every dot. You have just translated table &rarr; equation, and the graph certified the translation.</li>
+            <li>Click the gray intersection points of the line and the curve. Desmos reports two meetings: \((0, 1)\) exactly, and \(x \approx 4.13\) &mdash; the overtaking moment Example 1 could only bracket between 4 and 5.</li>
+            <li>Zoom out. Watch the vertical distance between curve and line explode. That picture <em>is</em> end behavior. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: The table \(t\): \((0,7), (1,10), (2,13), (3,16)\) meets the equation \(p(x) = 2^x\). Find each function's family and rule, compare average rates of change on \([0,3]\), and bracket where \(p\) overtakes \(t\). Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Constant difference \(+3\): \(t(x) = 3x + 7\), linear. \(p\) is exponential. Average rate on \([0,3]\): \(t\): \(\frac{16-7}{3} = 3\); \(p\): \(\frac{8-1}{3} = \frac{7}{3} \approx 2.33\) &mdash; the line is faster here, and \(t(3) = 16 > 8 = p(3)\). But \(p(4) = 16 < 19 = t(4)\) and \(p(5) = 32 > 22 = t(5)\): the exponential overtakes between \(x = 4\) and \(x = 5\), permanently.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Compute the average rate of change of \(k(x) = \sqrt{x}\) on \([0, 1]\) and on \([1, 9]\), and say in one sentence what the comparison reveals about the shape of the graph.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            On \([0,1]\): \(\frac{1 - 0}{1 - 0} = 1\). On \([1,9]\): \(\frac{3 - 1}{9 - 1} = \frac{2}{8} = \frac{1}{4}\). The average rate collapses from 1 to \(\frac{1}{4}\): the root climbs hard off the launch and then flattens &mdash; the numerical fingerprint of a concave-down graph.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Confusing <strong>&ldquo;bigger now&rdquo;</strong> with <strong>&ldquo;growing faster.&rdquo;</strong> In Example 1 the line holds the larger value all the way to \(x = 4\) while the exponential is already the faster grower in ratio terms &mdash; and one step later the standings flip forever. A value is a photograph; a rate is a film; end behavior is the ending. Comparing two functions honestly means citing the right feature for the claim: values for &ldquo;who leads at \(x = a\),&rdquo; average rate of change for &ldquo;who grew faster on \([a,b]\),&rdquo; end behavior for &ldquo;who wins.&rdquo; A claim backed by the wrong feature is not evidence &mdash; it is coincidence.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Napier's tables were so labor-saving that the astronomer-mathematician Pierre-Simon Laplace, two centuries later, said logarithms &ldquo;by shortening the labours, doubled the life of the astronomer.&rdquo; Kepler &mdash; then buried in the planetary calculations that would become his third law &mdash; wrote to Napier in admiration. A <em>table</em> did this. No graph, no formula bar, no screen: columns of numbers, computed once by one Scotsman over twenty years, then trusted by the world for three hundred and fifty more.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>A function is one idea in four costumes, and today you practiced seeing through all of them: diagnosing a family from a table's differences or ratios, reading launch points and asymptotes off a graph, translating a percent-per-year description into a decay curve, and refereeing duels with the right feature for each claim &mdash; values for now, average rate of change for the interval, end behavior for the long run. Twice today two functions <em>tied</em> &mdash; the line and the exponential at \((0,1)\), the log and the root at \(x = 4\) and \(x = 16\) &mdash; and both times the tie was the most interesting point on the page. Tomorrow those ties get a name and a method of their own: a <strong>system of equations</strong>, where instead of asking <em>who leads</em>, we ask exactly <em>where two functions meet</em> &mdash; and we bring algebra sharp enough to pin the meeting point down to the coordinate.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What does each of the four representations &mdash; equation, graph, table, description &mdash; reveal easily, and what does each hide well? Give one feature that each costume certifies better than the other three.</p>
+    <p>2. Why is average rate of change the fair way to compare two functions' growth between two checkpoints &mdash; and what can it still miss about what happened between them?</p>
+    <p>3. &ldquo;Bigger now&rdquo; and &ldquo;growing faster&rdquo; and &ldquo;wins eventually&rdquo; are three different claims. Which key feature testifies to each, and how did Example 1 keep all three straight?</p>
+    <p>4. In Example 2, both models fit the same car at \(t = 0\), yet one eventually speaks nonsense. How do you judge where a model's domain of honesty ends when the representations themselves cannot tell you?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-13 &middot; Comparing Functions Across Representations</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

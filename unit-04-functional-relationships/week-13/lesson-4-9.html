@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 4-9</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 4</div>
+        <div style="font-size: 13px; color: #666;">Functional Relationships</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">4-9</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Functional Relationships</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">4-9</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Finding and Graphing Inverses</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to find the inverse of a one-to-one function algebraically by the swap-and-solve method, and verify my answer by composition.</p></li>
+        <li><p>I will be able to graph a function and its inverse together as reflections across the line \(y = x\), with domains and ranges exchanged.</p></li>
+        <li><p>I will be able to read inverse values from a table or graph without any formula at all.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Inverse function</strong> \(f^{-1}\): The function that undoes \(f\) &mdash; for every pairing \(f(a) = b\), the inverse pairs \(f^{-1}(b) = a\). It exists exactly when \(f\) is one-to-one.</p>
+    <p><strong>Swap-and-solve</strong>: The algebraic method for finding \(f^{-1}\): write \(y = f(x)\), exchange the letters \(x\) and \(y\) (exchanging the roles of input and output), then solve for the new \(y\).</p>
+    <p><strong>Identity line</strong>: The line \(y = x\), where input and output are equal. It is the mirror of today's lesson: the graphs of \(f\) and \(f^{-1}\) are reflections of each other across it.</p>
+    <p><strong>One-to-one</strong> <em>(review from 4-8)</em>: A function in which no output is ever produced by two different inputs &mdash; the property, certified by the horizontal line test, that makes undoing possible at all.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday you learned what an inverse <em>is</em>: two functions that undo each other, certified by the composition test \(f^{-1}(f(x)) = x\) and \(f(f^{-1}(x)) = x\). But yesterday the candidate inverses were handed to you. Today you learn to manufacture them &mdash; and to see them. When Leibniz began writing about <em>functions</em> in the 1690s, his whole idea was that a function is a relationship read in a direction: from input to output. An inverse is the same relationship read the other way, with the courtesy returned &mdash; every output escorted back to the input it came from. The algebra of that reversal is one move, used three ways: on formulas, on graphs, and on tables.</p>
+    <p>The move is called <strong>swap-and-solve</strong>, and it works for a reason worth stating before the mechanics. The equation \(y = f(x)\) says &ldquo;\(y\) is the output of \(x\).&rdquo; Exchanging the letters &mdash; writing \(x = f(y)\) &mdash; asks the reverse question: &ldquo;which input \(y\) produced the output \(x\)?&rdquo; Solving for \(y\) answers it. The formula that emerges <em>is</em> \(f^{-1}\), because it expresses each input as a function of its output.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Find the inverse of \(f(x) = 2x + 3\), and verify by both compositions.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Write \(y = 2x + 3\), swap the letters, and solve:</p>
+    <p style="text-align: center;">\(x = 2y + 3 \;\;\Rightarrow\;\; x - 3 = 2y \;\;\Rightarrow\;\; y = \dfrac{x - 3}{2}\)</p>
+    <p>So \(f^{-1}(x) = \dfrac{x-3}{2}\). Notice what the inverse actually does: \(f\) says <em>multiply by 2, then add 3</em>; the inverse says <em>subtract 3, then divide by 2</em> &mdash; each step undone, <strong>in reverse order</strong>, like taking off shoes before socks. Verify:</p>
+    <p style="text-align: center;">\(f\!\left(f^{-1}(x)\right) = 2\cdot\dfrac{x-3}{2} + 3 = (x - 3) + 3 = x\) &#10003;</p>
+    <p style="text-align: center;">\(f^{-1}\!\left(f(x)\right) = \dfrac{(2x+3)-3}{2} = \dfrac{2x}{2} = x\) &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(f^{-1}(x) = \dfrac{x-3}{2}\), certified in both directions. The composition check is not a formality &mdash; it is the <em>definition</em> being confirmed, and it is how every inverse in this course earns its name.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Why the Mirror Works</strong></h4>
+        <p>Every fact about \(f^{-1}\) flows from one observation: if \((a, b)\) is a point of \(f\) &mdash; meaning \(f(a) = b\) &mdash; then \((b, a)\) is a point of \(f^{-1}\). The inverse's graph is the original's graph with <em>every coordinate pair swapped</em>.</p>
+        <ul>
+            <li>Swapping the coordinates of a point reflects it across the line \(y = x\): the point \((5, 2)\) and the point \((2, 5)\) are mirror images in that line. So the whole graph of \(f^{-1}\) is the whole graph of \(f\), <strong>reflected across the identity line</strong>.</li>
+            <li>Since inputs and outputs trade places, <strong>the domain of \(f^{-1}\) is the range of \(f\), and the range of \(f^{-1}\) is the domain of \(f\)</strong>. Whatever territory the original's outputs occupied, the inverse's inputs occupy.</li>
+            <li>Points on the line \(y = x\) itself &mdash; where input equals output &mdash; do not move under the reflection. Wherever the graph of \(f\) crosses the identity line, \(f^{-1}\) crosses at the very same point.</li>
+        </ul>
+        <p style="margin-bottom: 0;">One idea, three dividends: the algebra (swap the letters), the geometry (reflect across \(y=x\)), and the bookkeeping (domain and range exchange) are all the same coordinate swap.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Find the inverse of \(f(x) = \dfrac{3x - 2}{x + 1}\), and describe how the asymptotes of \(f\) and \(f^{-1}\) are related.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Swap and solve &mdash; the new \(y\) appears in two places, so gather its terms on one side and factor it out:</p>
+    <p style="text-align: center;">\(x = \dfrac{3y - 2}{y + 1}\)</p>
+    <p style="text-align: center;">\(x(y + 1) = 3y - 2\)</p>
+    <p style="text-align: center;">\(xy + x = 3y - 2\)</p>
+    <p style="text-align: center;">\(xy - 3y = -x - 2\)</p>
+    <p style="text-align: center;">\(y(x - 3) = -(x + 2) \;\;\Rightarrow\;\; y = \dfrac{x + 2}{3 - x}\)</p>
+    <p>Spot-check with a point before trusting it: \(f(0) = -2\), and \(f^{-1}(-2) = \dfrac{0}{5} = 0\) &#10003;. The full composition check (worth doing once tonight) gives \(\dfrac{5x}{5} = x\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(f^{-1}(x) = \dfrac{x + 2}{3 - x}\). Now look at the asymptotes with Unit 2 eyes. The original has vertical asymptote \(x = -1\) and horizontal asymptote \(y = 3\); the inverse has vertical asymptote \(x = 3\) and horizontal asymptote \(y = -1\). <strong>The asymptotes traded places</strong> &mdash; and they had to, because the vertical asymptote marks a hole in the domain, the horizontal marks a hole in the range, and domain and range are exactly what an inverse exchanges.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Find the inverse of \(f(x) = \sqrt{x + 4}\), graph \(f\) and \(f^{-1}\) on the same axes, and state both domains and ranges.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>First read the original: domain \([-4, \infty)\) (the radicand's guard), range \([0, \infty)\) (the principal root's outputs). Now swap and solve &mdash; and since solving requires <em>squaring</em>, Unit 3's discipline comes with it:</p>
+    <p style="text-align: center;">\(x = \sqrt{y + 4}\)</p>
+    <p><strong>Guard:</strong> the left side equals a principal square root, so \(x \geq 0\) &mdash; posted before squaring. Then:</p>
+    <p style="text-align: center;">\(x^2 = y + 4 \;\;\Rightarrow\;\; y = x^2 - 4, \qquad x \geq 0\)</p>
+    <p>The guard is not decoration. Without it, \(y = x^2 - 4\) is a <em>full parabola</em> &mdash; a curve that fails the vertical line test's mirror image and includes a phantom branch that was never part of the reversal. Squaring created that extra branch, exactly as it created ghost solutions in 3-10; the posted guard \(x \geq 0\) cuts it away and keeps only the true inverse.</p>
+    <p>For the graph, swap the anchor points of \(f\): the points \((-4, 0)\), \((-3, 1)\), \((0, 2)\), \((5, 3)\) on \(f\) become \((0, -4)\), \((1, -3)\), \((2, 0)\), \((3, 5)\) on \(f^{-1}\). Draw both curves and the dashed line \(y = x\): each curve is the other's reflection.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(f^{-1}(x) = x^2 - 4\) with domain \([0, \infty)\) and range \([-4, \infty)\) &mdash; precisely the range and domain of \(f\), exchanged. Verify the guard did its work: \(f^{-1}(f(x)) = \left(\sqrt{x+4}\right)^2 - 4 = x\) &#10003;, and \(f(f^{-1}(x)) = \sqrt{x^2 - 4 + 4} = \sqrt{x^2} = |x| = x\) <em>because</em> \(x \geq 0\) &#10003;. That absolute value quietly becoming \(x\) is the guard earning its keep.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>The Inverse Dictionary</strong></h4>
+        <p style="margin-bottom: 8px;">Everything an inverse does, in five matched pairs &mdash; memorize the left column and the right column comes free:</p>
+        <ul style="margin-bottom: 0;">
+            <li>\(f\) sends \(a \mapsto b\) &nbsp;&harr;&nbsp; \(f^{-1}\) sends \(b \mapsto a\)</li>
+            <li>point \((a, b)\) on \(f\) &nbsp;&harr;&nbsp; point \((b, a)\) on \(f^{-1}\)</li>
+            <li>domain of \(f\) &nbsp;&harr;&nbsp; range of \(f^{-1}\) (and vice versa)</li>
+            <li>vertical asymptote of \(f\) at \(x = c\) &nbsp;&harr;&nbsp; horizontal asymptote of \(f^{-1}\) at \(y = c\)</li>
+            <li>graph of \(f\) &nbsp;&harr;&nbsp; graph of \(f^{-1}\), reflected across \(y = x\)</li>
+        </ul>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>The table below defines a one-to-one function \(f\). Find \(f^{-1}(3)\), \(f^{-1}(-4)\), and \(\left(f^{-1} \circ f\right)(1)\).</p>
+    <p style="text-align: center;">\(\begin{array}{c|ccccc} x & -2 & 0 & 1 & 3 & 5 \\ \hline f(x) & 7 & 3 & 0 & -1 & -4 \end{array}\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>No formula, no algebra &mdash; an inverse value is a question read backward through the table. \(f^{-1}(3)\) asks: <em>which input produced the output 3?</em> Scan the bottom row: \(f(0) = 3\), so \(f^{-1}(3) = 0\). Likewise \(f(5) = -4\), so \(f^{-1}(-4) = 5\). For the composition: \(f(1) = 0\), and \(f^{-1}(0)\) asks which input produced 0 &mdash; that is \(1\) itself, so \(\left(f^{-1} \circ f\right)(1) = 1\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(f^{-1}(3) = 0\), \(\;f^{-1}(-4) = 5\), \(\;\left(f^{-1} \circ f\right)(1) = 1\). The last one is the whole theory in miniature: an inverse composed with its function returns every input home, whether the function lives in a formula, a graph, or five columns of a table. (And note why the table's one-to-one-ness mattered: if two inputs had shared the output 3, the question &ldquo;which input produced 3?&rdquo; would have no single answer &mdash; and \(f^{-1}\) would not be a function.)</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: The Mirror, Live</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), rebuild Example 3 &mdash; and learn Desmos's best inverse trick:</p>
+        <ol>
+            <li>Graph <strong>f(x) = sqrt(x + 4)</strong>, and add the identity line <strong>y = x</strong> (click its color swatch and make it dashed &mdash; it is scaffolding, not a curve under study).</li>
+            <li>Now type <strong>x = sqrt(y + 4)</strong>. Desmos graphs any equation in \(x\) and \(y\), so this plots every point whose <em>coordinates satisfy the swapped equation</em> &mdash; which is precisely the graph of \(f^{-1}\), no solving required. Watch it appear as the mirror image of \(f\).</li>
+            <li>Check your algebra against the machine: graph <strong>y = x^2 - 4</strong>. The parabola matches Desmos's inverse curve on the right half &mdash; <em>and grows an extra left branch the inverse does not have</em>. That surplus branch is what the guard \(x \geq 0\) exists to remove. Fix it: <strong>y = x^2 - 4 {x &gt;= 0}</strong> &mdash; now the match is exact.</li>
+            <li>Turn the grid: click any point on \(f\), read its coordinates, and find the swapped pair on the inverse curve. Every pair, every time. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Find the inverse of \(f(x) = 4 - 2x\) and verify it by both compositions. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Swap: \(x = 4 - 2y\), so \(2y = 4 - x\) and \(y = \dfrac{4 - x}{2} = 2 - \dfrac{x}{2}\). Verify: \(f\!\left(2 - \tfrac{x}{2}\right) = 4 - 2\left(2 - \tfrac{x}{2}\right) = 4 - 4 + x = x\) &#10003;; and \(f^{-1}(4 - 2x) = 2 - \dfrac{4 - 2x}{2} = 2 - 2 + x = x\) &#10003;. So \(f^{-1}(x) = 2 - \dfrac{x}{2}\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Find the inverse of \(f(x) = \sqrt{x - 1} + 2\), with the guard posted and both domains stated.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(f\) has domain \([1, \infty)\) and range \([2, \infty)\). Swap: \(x = \sqrt{y - 1} + 2\), so \(x - 2 = \sqrt{y - 1}\) &mdash; guard: \(x \geq 2\). Square: \((x-2)^2 = y - 1\), so \(f^{-1}(x) = (x - 2)^2 + 1\) with domain \([2, \infty)\) and range \([1, \infty)\). Check: \(f\!\left(f^{-1}(x)\right) = \sqrt{(x-2)^2 + 1 - 1} + 2 = |x - 2| + 2 = x\) since \(x \geq 2\) &#10003;.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Reading \(f^{-1}(x)\) as \(\dfrac{1}{f(x)}\). The superscript \(-1\) on a <em>function</em> means &ldquo;inverse under composition,&rdquo; not &ldquo;reciprocal&rdquo; &mdash; the two are almost never equal. Test it on Example 1: \(\dfrac{1}{f(1)} = \dfrac{1}{5}\), but \(f^{-1}(1) = \dfrac{1-3}{2} = -1\). Not close. When a reciprocal is genuinely meant, write \(\left(f(x)\right)^{-1}\) or \(\dfrac{1}{f(x)}\) &mdash; and keep \(f^{-1}(x)\) reserved for the undoing function. This distinction will matter enormously in the spring, when \(\sin^{-1} x\) means arcsine and emphatically <em>not</em> \(\frac{1}{\sin x}\).</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The notation \(f^{-1}\) is younger than you might guess. Leibniz gave mathematics the <em>word</em> &ldquo;function&rdquo; in the 1690s and Euler gave it the <em>costume</em> \(f(x)\) in the 1730s, but the inverse had no symbol of its own until 1813, when the English astronomer John Herschel proposed \(f^{-1}\) &mdash; borrowing the exponent notation on purpose, so that \(f^{-1}(f(x)) = x\) would echo \(a^{-1} \cdot a = 1\). Herschel himself flagged the danger you just met in the common-mistake box: the same symbol already meant <em>reciprocal</em>. Mathematics kept the notation, ambiguity and all &mdash; which is why, two centuries later, precision about which \(-1\) you mean is still part of the craft.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>One coordinate swap paid three ways today: swap the letters and you have the algebra of \(f^{-1}\); swap the coordinates and you have its graph, mirrored across \(y = x\); swap domain and range and you have its bookkeeping, down to asymptotes trading places. And when the solving required a square, Unit 3's guard discipline came along &mdash; because squaring manufactures a phantom branch for inverses exactly as it manufactured ghost solutions for equations, and the posted guard is what keeps the reversal honest. But everything today rested on a courtesy the function had to extend first: being one-to-one. Tomorrow we face the functions that refuse &mdash; the parabolas and absolute values whose folded graphs make the reverse question ambiguous &mdash; and learn the elegant compromise that makes them invertible anyway. That compromise, small as it looks, is the reason half of next semester's trigonometry will exist.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does exchanging the letters \(x\) and \(y\) &mdash; a purely notational act &mdash; produce the inverse function? What question is the swapped equation actually asking?</p>
+    <p>2. A single fact &mdash; \((a, b)\) on \(f\) means \((b, a)\) on \(f^{-1}\) &mdash; explains the mirror graph, the domain-range exchange, and the asymptote trade. Trace each consequence back to the swap.</p>
+    <p>3. In Example 3, where exactly did the guard \(x \geq 0\) come from, and what false branch would the inverse have grown without it?</p>
+    <p>4. Why must \(\left(f^{-1}\circ f\right)(x) = x\) hold for <em>every</em> \(x\) in the domain &mdash; and why is checking only one direction of the composition not yet a proof?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">4-9 &middot; Finding and Graphing Inverses</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

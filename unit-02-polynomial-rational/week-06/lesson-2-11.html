@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 2-11</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 2</div>
+        <div style="font-size: 13px; color: #666;">Polynomial and Rational Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">2-11</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polynomial and Rational Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">2-11</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Choosing Truthful Models (Unit Synthesis)</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to select between polynomial and rational models for a real situation, using long-run behavior as the deciding evidence.</p></li>
+        <li><p>I will be able to write a model defense: claim, evidence from end behavior and asymptotes, domain of honesty, verdict.</p></li>
+        <li><p>I will be able to articulate how this unit's tools &mdash; end behavior, zeros, division, asymptotes &mdash; form one connected account of two function families.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Model family</strong>: A class of functions sharing one structural form &mdash; this unit's two: polynomials and rational functions.</p>
+    <p><strong>Long-run behavior</strong>: What a model predicts as its input grows without bound &mdash; a polynomial's ends run to \(\pm\infty\); a rational function's may level onto an asymptote.</p>
+    <p><strong>Saturation</strong>: A real process leveling off toward a ceiling or floor it cannot pass &mdash; the behavior rational models capture and polynomials cannot.</p>
+    <p><strong>Model defense</strong>: A short written argument for a model choice, resting on structure and long-run truth rather than fit alone.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Six weeks ago this unit opened with a duel in Bologna; it closes with a quieter contest that you will referee for the rest of your mathematical life: <em>two candidate models, one real situation &mdash; which function deserves your trust?</em> Everything the unit built was preparation for this question. End behavior (2-1) and asymptotes (2-7, 2-8) are the two families' sworn testimony about the long run; zeros and domains say where each model lives and dies; and the fitting lesson (2-6) taught the cardinal rule that a good score is not a good reason. Today assembles it all into a working judgment &mdash; the judgment your Focus assignment and Thursday's unit test will ask you to exercise in writing.</p>
+    <p>Start with the two families' characters, honestly compared:</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Two Families, Two Kinds of Long-Run Truth</strong></h4>
+        <ul>
+            <li><strong>Polynomials</strong> have ends that run away: every polynomial's outputs go to \(+\infty\) or \(-\infty\) in both directions, no exceptions (the leading term guarantees it). They are the honest choice for quantities built by <em>multiplying dimensions</em> (volumes, areas) on a <strong>bounded domain</strong> &mdash; and a dishonest choice for anything that levels off, because a polynomial cannot level off. Ever.</li>
+            <li><strong>Rational functions</strong> can hold a long-run level: horizontal asymptotes let them encode floors, ceilings, and saturation &mdash; per-unit costs, concentrations, anything &ldquo;per&rdquo; anything. They are the honest choice when the situation itself has a limit it approaches but cannot pass.</li>
+        </ul>
+        <p style="margin-bottom: 0;"><strong>The deciding question:</strong> <em>what does the real situation do in the long run?</em> If it runs away, a polynomial can say so. If it levels off, only a rational function (of this unit's families) can tell that truth. Match the family's destiny to the situation's destiny <em>first</em>; fit coefficients second.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>A patient takes a single dose of medication, and the blood concentration is measured hourly for five hours: it rises quickly, peaks near 2.5 mg/L around hour 1, and declines. Two models fit the five data points about equally well: a quadratic \(q(t) = -0.9t^2 + 3.4t + 0.1\) and the rational function \(r(t) = \dfrac{5t}{t^2 + 1}\). Which deserves trust, and why?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Interrogate both models about the long run &mdash; the hours <em>beyond</em> the data, which is where models earn their keep.</p>
+    <p><em>The quadratic:</em> negative leading coefficient, so both ends fall to \(-\infty\). It predicts the concentration crosses zero (around \(t \approx 3.8\)) and then goes <strong>negative, without bound</strong> &mdash; less than no drug in the blood, and ever more so. Structurally false, not just inaccurate.</p>
+    <p><em>The rational candidate:</em> numerator degree 1, denominator degree 2 &mdash; horizontal asymptote \(y = 0\). It predicts the concentration decays toward zero and never dips below it: check the formula &mdash; for \(t \ge 0\), \(\frac{5t}{t^2+1}\) is never negative. Peak: \(r(1) = \frac{5}{2} = 2.5\) mg/L, matching the data. Long run: the drug washes out, approaching zero forever &mdash; which is what bodies actually do.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The rational model &mdash; not because it fits better (it doesn't, noticeably), but because its <em>structure tells the truth about the ends</em>: medication washes out toward zero; it does not go negative. The quadratic was never a model of pharmacology; it was a curve visiting the data.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Model Defense &mdash; a Four-Line Argument</strong></h4>
+        <p>Every model choice in this course is defended in writing, in this shape:</p>
+        <ol>
+            <li><strong>Claim:</strong> the family (and degree) chosen.</li>
+            <li><strong>Structural evidence:</strong> what in the situation dictates the form &mdash; dimensions multiplying, a ratio of changing quantities, a saturation level.</li>
+            <li><strong>Long-run evidence:</strong> what the situation does at its far end, and how the model's end behavior or asymptote matches it &mdash; including what the <em>rejected</em> candidate would falsely predict.</li>
+            <li><strong>Domain of honesty:</strong> where the model's answers deserve trust, stated as an interval with reasons.</li>
+        </ol>
+        <p style="margin-bottom: 0;">Notice what is absent: \(R^2\). Fit enters only after form is settled &mdash; it tunes coefficients inside an honest family; it never chooses the family. A defense that leads with the fit score has conceded the argument.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A startup's accountant fits the company's average cost per unit over its first six quarters with a downward-sloping line, \(L(x) = 31 - 0.004x\), and reports: &ldquo;at this rate, average cost hits zero near 7,750 units and goes negative &mdash; production will eventually pay for itself!&rdquo; Write the model defense that corrects this, given fixed costs of $11,500 per quarter and $8 materials per unit.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>Claim:</em> average cost is a rational function, \(\overline{C}(x) = \frac{11{,}500 + 8x}{x} = 8 + \frac{11{,}500}{x}\), not a line.</p>
+    <p><em>Structural evidence:</em> average cost is by definition a ratio &mdash; total cost over quantity &mdash; and its numerator and denominator both change with \(x\). The form is dictated before any data arrives.</p>
+    <p><em>Long-run evidence:</em> the rational model has horizontal asymptote \(y = 8\): average cost falls forever <em>toward</em> the $8 materials floor and never reaches it, because each unit always carries its own materials plus a nonzero share of rent. The line, extended, predicts \(\$0\) and then negative cost per unit &mdash; production so efficient the units pay the company to make them. No cost structure on earth does this; the line's long run is fiction.</p>
+    <p><em>Domain of honesty:</em> the line approximates the rational curve decently over the sampled quarters (where the curve is nearly straight) &mdash; that is why it fit &mdash; but its trustworthy domain ends where the data does. The rational model is honest on all \(x &gt; 0\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The accountant fit a tangent-line snapshot of a curving truth and extrapolated the snapshot. The rational model, built from the cost structure, is the one whose forever can be trusted &mdash; and its asymptote delivers the honest verdict: costs approach $8 per unit and no cleverness of scale beats the floor.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>When is the <em>polynomial</em> the honest choice? Revisit the corner-cut box, \(V(x) = x(20-2x)(16-2x)\), and defend it against a rational challenger.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>Claim:</em> a cubic polynomial, in factored form, on the domain \((0, 8)\).</p>
+    <p><em>Structural evidence:</em> volume is three lengths multiplied; each length is linear in the cut \(x\); the product is degree 3 by construction. No ratio exists anywhere in the situation &mdash; nothing is &ldquo;per&rdquo; anything.</p>
+    <p><em>Long-run evidence:</em> there is no long run! The situation itself is bounded &mdash; cuts live strictly between 0 and 8 cm &mdash; so the cubic's runaway ends are never consulted. A polynomial's one structural weakness is irrelevant on a bounded domain. (A rational challenger would need an asymptote to justify its denominator, and this situation has nothing that saturates &mdash; the extra machinery would model nothing.)</p>
+    <p><em>Domain of honesty:</em> \(0 &lt; x &lt; 8\), from the scissors, declared at birth.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The cubic, exactly as built in Lesson 2-6. The moral completes the unit: neither family is &ldquo;better.&rdquo; Polynomials are honest where quantities multiply on bounded domains; rational functions are honest where quantities ratio and situations saturate. <strong>Honesty is a property of the match, not of the family.</strong></p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Defending a model with &ldquo;it fits the data better.&rdquo; Over any modest data range, a high-degree polynomial will out-fit an honest rational model <em>every time</em> &mdash; more coefficients always hug points more tightly. The Example 1 quadratic fit five points beautifully while predicting negative medication. Fit measures the past; structure predicts the future. On the unit test and the applied task, a fit-first defense scores as what it is: the reasoning criterion's &ldquo;<em>what</em> without <em>why</em>.&rdquo;</div>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: The Long Run on Trial</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>Stage Example 1's contest at <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below):</p>
+        <ol>
+            <li>Enter the two candidates: <strong>q(t) = -0.9t^2 + 3.4t + 0.1</strong> and <strong>r(t) = 5t/(t^2 + 1)</strong>, with <strong>{t &gt; 0}</strong> appended to each.</li>
+            <li>Restrict your window to the data's range first &mdash; \(0 \le t \le 5\), \(0 \le y \le 3\). The two curves nearly coincide: <em>inside the data, the contest looks like a tie.</em> This is why fit alone cannot referee.</li>
+            <li>Now widen to \(t\) from 0 to 15. Watch the quadratic dive through zero and plunge; watch the rational curve settle gently onto the axis. The models agreed about the past and disagree completely about the future &mdash; and only one future is pharmacology.</li>
+            <li>Add the line <strong>y = 0</strong>: the boundary between medicine and nonsense, crossed by exactly one candidate.</li>
+        </ol>
+        <p style="margin-bottom: 0;">This two-window habit &mdash; <em>data window, then destiny window</em> &mdash; is the fastest model-judgment tool you own. Use it on the applied task this week.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A wildlife preserve's deer population grows quickly at first, then levels off near the land's carrying capacity. A consultant offers a cubic model with a strong fit. Write the two-sentence core of the rejection. Work it before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            A leveling-off population saturates toward a ceiling, and no polynomial can hold a level &mdash; every cubic's ends run to \(\pm\infty\), so this one must eventually predict either unbounded deer or negative deer. The honest family needs a horizontal asymptote at the carrying capacity, which is rational-function territory (and, later in Unit 3, logistic territory) &mdash; the fit score cannot repair a family that is structurally unable to tell the story's ending.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Name the honest family, with one structural reason and one long-run reason each: &#9312; the area of a square photo enlarged by scale factor \(s\); &#9313; the average download cost per gigabyte on a plan with a $40 base fee; &#9314; the concentration of pollutant in a lake as clean water flows through.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            &#9312; Polynomial (degree 2): two dimensions multiply; the domain is bounded by physical print sizes, so runaway ends never testify. &#9313; Rational: cost <em>per</em> gigabyte is a ratio; asymptote at the per-GB rate is the floor the base fee's share approaches. &#9314; Rational: amount over volume, both changing; the long run saturates toward the inflow's (clean) concentration &mdash; an asymptote at zero, which is the honest fate of a flushed lake.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The statistician George Box gave applied mathematics its most-quoted sentence: <em>&ldquo;All models are wrong, but some are useful.&rdquo;</em> Less quoted is his next thought &mdash; that the practical question is &ldquo;how wrong do they have to be to not be useful.&rdquo; This unit's answer: a model stops being useful exactly where it starts lying about structure &mdash; negative volumes, negative concentrations, costs below the materials floor. Honest modeling is not the search for a right model; it is the discipline of knowing precisely where and how yours is wrong.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>This unit began with a promise: a polynomial cannot lie about its long run. It ends with the responsibility that promise creates &mdash; since the functions testify truthfully, the modeler who picks the wrong witness owns the falsehood. You can now read a polynomial's destiny from its leading term, dismantle it to its zeros and rebuild it to order, read a rational function's floors and ceilings from its degrees, and &mdash; the capstone skill &mdash; match a family's destiny to a situation's and defend the match in four honest lines. Thursday's unit test gathers all of it: fluency, reasoning, and one synthesis problem that reaches back to Unit 1. And this week's applied task, <em>The Honest Box</em>, hands you a real sheet of card, real scissors, and real noisy data &mdash; the referee's chair is yours.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What can a rational function say about the long run that no polynomial can &mdash; and what real situations need exactly that testimony?</p>
+    <p>2. Why does fit measure the past while structure predicts the future, and where in a model defense does each kind of evidence belong?</p>
+    <p>3. When is a polynomial the honest choice despite its runaway ends &mdash; what makes its structural weakness irrelevant?</p>
+    <p>4. Looking back across the unit: how do end behavior, zeros, division, and asymptotes combine into one account of how these two families tell the truth?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">2-11 &middot; Choosing Truthful Models (Unit Synthesis)</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

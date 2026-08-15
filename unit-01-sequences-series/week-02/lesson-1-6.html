@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 1-6</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 1</div>
+        <div style="font-size: 13px; color: #666;">Sequences and Series</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">1-6</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Sequences and Series</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">1-6</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Geometric Sequences</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to determine whether a sequence is geometric and, when it is, identify its common ratio &mdash; including negative and fractional ratios.</p></li>
+        <li><p>I will be able to write both the explicit form \(a_n = a_1 r^{\,n-1}\) and the recursive form of a geometric sequence, and translate between them.</p></li>
+        <li><p>I will be able to find any specified term of a geometric sequence, including when I am given two scattered terms instead of the first one.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Geometric sequence</strong>: A sequence in which each term is obtained from the one before it by multiplying by the same fixed number.</p>
+    <p><strong>Common ratio</strong>: That fixed multiplier, written \(r\). It is found by dividing any term by the term before it: \(r = \dfrac{a_n}{a_{n-1}}\).</p>
+    <p><strong>Explicit form (geometric)</strong>: \(a_n = a_1 \, r^{\,n-1}\) &mdash; any term computed directly from its position.</p>
+    <p><strong>Recursive form (geometric)</strong>: \(a_1\) given, \(a_n = r \, a_{n-1}\) &mdash; each term built by one multiplication from its predecessor.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>This unit opened, back in Lesson 1-1, with a video whose views doubled every day: \(2, 4, 8, 16, 32, \ldots\) When you tested that sequence for a common difference in Lesson 1-3, it failed &mdash; the gaps were \(2, 4, 8, 16\), growing rather than constant. But divide instead of subtract and the pattern snaps into focus: every term is exactly <em>twice</em> its predecessor. That is the signature of the second great family. Where the arithmetic family <strong>adds</strong> the same amount at each step, the <strong>geometric</strong> family <strong>multiplies</strong> by the same amount at each step &mdash; and the difference between those two verbs turns out to be one of the most consequential distinctions in all of applied mathematics.</p>
+    <p>An old legend measures the gap. The vizier who invented chess so delighted his king that he was offered any reward. He asked modestly: one grain of rice on the first square of the board, two on the second, four on the third &mdash; each square doubling &mdash; through all 64 squares. The king laughed at the humble request and agreed. The last square alone would owe \(2^{63}\) grains &mdash; roughly nine quintillion, more rice than the kingdom, or the world, has ever grown. Addition plods; multiplication compounds. By the end of this lesson you will command the family that compounds.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Geometric Sequences and the Common Ratio</strong></h4>
+        <p>A sequence is <strong>geometric</strong> if the ratio of consecutive terms is constant:</p>
+        <p style="text-align: center;">\(\Large r = \dfrac{a_n}{a_{n-1}} \; \text{ for every } n\)</p>
+        <ul>
+            <li>If \(r &gt; 1\), the terms <strong>grow</strong> &mdash; each is a fixed multiple larger than the last.</li>
+            <li>If \(0 &lt; r &lt; 1\), the terms <strong>shrink</strong> toward zero &mdash; multiplying by a proper fraction is a kind of division.</li>
+            <li>If \(r &lt; 0\), the terms <strong>alternate in sign</strong> &mdash; every multiplication flips them across zero. (The \((-1)^n\) machinery from Lesson 1-1, built into the ratio itself.)</li>
+            <li>\(r = 0\) is excluded &mdash; the sequence would collapse &mdash; and to test membership you must check <em>every</em> consecutive ratio, just as with differences.</li>
+        </ul>
+        <p style="margin-bottom: 0;">In recursive language: \(a_1\) given, \(a_n = r\,a_{n-1}\). One seed, one multiplier, and the whole sequence follows.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Determine whether each sequence is geometric. If it is, state the common ratio.</p>
+    <p>&#9312; \(3, \; 12, \; 48, \; 192, \; \ldots\) &emsp; &#9313; \(100, \; 50, \; 25, \; 12.5, \; \ldots\) &emsp; &#9314; \(2, \; 6, \; 10, \; 14, \; \ldots\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>&#9312; Divide consecutive terms, every pair:</p>
+    <p style="text-align: center;">\(\dfrac{12}{3} = 4, \quad \dfrac{48}{12} = 4, \quad \dfrac{192}{48} = 4\)</p>
+    <p>Constant ratio &mdash; geometric with \(r = 4\).</p>
+    <p>&#9313; \(\dfrac{50}{100} = \dfrac{1}{2}\), \(\dfrac{25}{50} = \dfrac{1}{2}\), \(\dfrac{12.5}{25} = \dfrac{1}{2}\). Geometric with \(r = \dfrac{1}{2}\) &mdash; a shrinking member of the family. Halving is as geometric as doubling.</p>
+    <p>&#9314; \(\dfrac{6}{2} = 3\) but \(\dfrac{10}{6} = \dfrac{5}{3}\). Not geometric. (The <em>differences</em>, though, are constantly 4 &mdash; this one belongs to Monday&rsquo;s family. Every sequence you meet from now on deserves both tests.)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> &#9312; geometric, \(r = 4\) &emsp; &#9313; geometric, \(r = \tfrac{1}{2}\) &emsp; &#9314; not geometric (arithmetic, \(d = 4\)).</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Write the first five terms of the geometric sequence with \(a_1 = 5\) and \(r = -2\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Multiply by \(-2\) at every step, tracking the sign with care:</p>
+    <p style="text-align: center;">\(a_1 = 5\)</p>
+    <p style="text-align: center;">\(a_2 = 5 \cdot (-2) = -10\)</p>
+    <p style="text-align: center;">\(a_3 = -10 \cdot (-2) = 20\)</p>
+    <p style="text-align: center;">\(a_4 = 20 \cdot (-2) = -40\)</p>
+    <p style="text-align: center;">\(a_5 = -40 \cdot (-2) = 80\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The first five terms are \(5, \; -10, \; 20, \; -40, \; 80\).</p>
+    <p>The magnitudes double while the signs alternate &mdash; two behaviors, one ratio. A negative \(r\) does both jobs at once.</p>
+
+    <p>Now compress the recursion, exactly as we did for the arithmetic family. By the time you reach term \(n\), the rule &ldquo;multiply by \(r\)&rdquo; has acted \(n - 1\) times on the seed &mdash; and \(n-1\) repeated multiplications are, by definition, a power:</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Explicit Form of a Geometric Sequence</strong></h4>
+        <p style="text-align: center;">\(\Large a_n = a_1 \, r^{\,n-1}\)</p>
+        <p>Read it as a story: <em>start at \(a_1\), then multiply by \(r\), \(n-1\) times.</em> The exponent counts steps between term 1 and term \(n\) &mdash; the same fence-post count as the arithmetic \((n-1)d\), now living upstairs in the exponent.</p>
+        <p style="margin-bottom: 0;">Set the two families side by side and the symmetry is exact: arithmetic repeats <em>addition</em>, so its formula contains <em>multiplication</em> \((n-1)d\); geometric repeats <em>multiplication</em>, so its formula contains <em>a power</em> \(r^{n-1}\). Each family&rsquo;s formula is one rung up the ladder of operations from the family itself. And just as arithmetic sequences trace straight lines, geometric sequences with positive ratio trace exponential curves &mdash; a connection that will bloom fully in Unit 3.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Find the 10th term of the geometric sequence \(3, \; 6, \; 12, \; 24, \; \ldots\)</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Identify the ingredients: \(a_1 = 3\) and \(r = \frac{6}{3} = 2\) (confirm: \(\frac{12}{6} = 2\) &#10003;). Then:</p>
+    <p style="text-align: center;">\(a_{10} = a_1 \, r^{\,10-1} = 3 \cdot 2^9\)</p>
+    <p style="text-align: center;">\(a_{10} = 3 \cdot 512 = 1536\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(a_{10} = 1536\).</p>
+    <p>Nine doublings turn 3 into 1,536. Compare: an <em>arithmetic</em> sequence starting at 3 and <em>adding</em> 2 at each step reaches only \(3 + 9 \cdot 2 = 21\) by its tenth term. Same starting point, same &ldquo;2,&rdquo; different verb &mdash; and a 70-fold gap after just ten terms. The vizier knew what he was asking for.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Two classic slips, both caught by the same test. Writing \(a_n = a_1 r^{\,n}\) (exponent \(n\) instead of \(n-1\)) overshoots every term by one multiplication &mdash; check \(n = 1\): it gives \(a_1 r\), not \(a_1\). And writing \(a_n = (a_1 r)^{n-1}\) &mdash; parenthesizing the seed into the power &mdash; is a different error with the same cure. <strong>Always test your formula at \(n = 1\) and \(n = 2\) before trusting it.</strong> Thirty seconds of substitution, every time.</div>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A geometric sequence has \(a_2 = 12\) and \(a_5 = 96\). Find an explicit formula for \(a_n\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Reason in steps, as with the arithmetic family &mdash; but the steps are multiplications. Getting from term 2 to term 5 takes \(5 - 2 = 3\) multiplications by \(r\), so:</p>
+    <p style="text-align: center;">\(a_5 = a_2 \cdot r^3\)</p>
+    <p style="text-align: center;">\(96 = 12\,r^3\)</p>
+    <p style="text-align: center;">\(r^3 = 8, \quad r = 2\)</p>
+    <p>Walk back one step from \(a_2\) to the seed: \(a_1 = \dfrac{a_2}{r} = \dfrac{12}{2} = 6\). Assemble:</p>
+    <p style="text-align: center;">\(a_n = 6 \cdot 2^{\,n-1}\)</p>
+    <p>Verify against both given terms: \(a_2 = 6 \cdot 2^1 = 12\) &#10003; and \(a_5 = 6 \cdot 2^4 = 96\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(a_n = 6 \cdot 2^{\,n-1}\).</p>
+    <p>Where the arithmetic version of this problem divided a <em>rise</em> by a number of steps, the geometric version takes a <em>root</em>: three steps multiplying to 8 means each step is \(\sqrt[3]{8} = 2\). Difference is to slope as ratio is to growth factor &mdash; carry that analogy; it organizes half of precalculus.</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Write a recursive formula for the sequence of Example 4, and state which form you would use to find \(a_{40}\) &mdash; and which to build a quick table of the first ten terms.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(\Large a_1 = 6, \quad a_n = 2\,a_{n-1}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(a_1 = 6, \; a_n = 2a_{n-1}\). For \(a_{40}\), the explicit form wins &mdash; one computation, \(6 \cdot 2^{39}\), instead of thirty-nine multiplications. For a table, the recursive form wins &mdash; each row is one doubling of the last, which is exactly how a spreadsheet fill-down (or a patient hand) works. Two languages, one sequence: the standing theme of this unit, now fluent in both families.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: Line vs. Curve &mdash; the Two Families on One Screen</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>Open Desmos at <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or the window below) and stage the race from Example 3:</p>
+        <ol>
+            <li>Line 1: <strong>f(n) = 3 + 2(n &minus; 1)</strong> &mdash; the arithmetic sequence (start 3, add 2).</li>
+            <li>Line 2: <strong>g(n) = 3 &middot; 2^(n &minus; 1)</strong> &mdash; the geometric sequence (start 3, double).</li>
+            <li>Line 3: <strong>n1 = [1, ..., 10]</strong>. Lines 4 and 5: <strong>(n1, f(n1))</strong> and <strong>(n1, g(n1))</strong>.</li>
+            <li>Zoom so both families fit (try a window of 0 to 11 across, 0 to 200 up). Watch the arithmetic points march in their straight line while the geometric points hug the floor briefly &mdash; and then leave.</li>
+        </ol>
+        <p style="margin-bottom: 0;">Now experiment with the ratio: change \(g\) to use \(1.5^{n-1}\), then \(0.5^{n-1}\), then \((-2)^{n-1}\) (plot more points for that last one and describe what you see). Every geometric sequence with \(r &gt; 0\) rides an exponential curve the way every arithmetic sequence rides a line &mdash; and \(r &lt; 0\) bounces between two mirror-image curves. One more experiment: turn on both point sets with \(f(n) = 3 + 20(n-1)\) &mdash; a far more generous arithmetic step &mdash; and find the term where doubling overtakes it anyway. It always overtakes. That inevitability is next lesson&rsquo;s subject.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Find the 8th term of the geometric sequence \(64, \; 32, \; 16, \; 8, \; \ldots\) Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Here \(a_1 = 64\) and \(r = \frac{32}{64} = \frac{1}{2}\). Then \(a_8 = 64 \cdot \left(\frac{1}{2}\right)^{7} = \dfrac{64}{128} = \dfrac{1}{2}\). Seven halvings carry 64 below 1 &mdash; the shrinking side of the family heads toward zero without ever arriving. (Hold that thought until Lesson 1-9.)
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A geometric sequence has \(a_3 = 18\) and \(a_6 = 486\). Find \(r\), \(a_1\), and an explicit formula.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            From term 3 to term 6 is 3 multiplications: \(486 = 18\,r^3\), so \(r^3 = 27\) and \(r = 3\). Then \(a_1 = \dfrac{a_3}{r^2} = \dfrac{18}{9} = 2\), giving \(a_n = 2 \cdot 3^{\,n-1}\). Check: \(a_3 = 2 \cdot 9 = 18\) &#10003;, \(a_6 = 2 \cdot 243 = 486\) &#10003;.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The name <em>geometric</em> is the mirror of Lesson 1-3&rsquo;s <em>arithmetic</em>: each interior term of a geometric sequence is the <em>geometric mean</em> of its neighbors &mdash; \(\sqrt{a_{n-1} \cdot a_{n+1}}\) &mdash; just as each arithmetic term was their ordinary average. Test it on \(3, 6, 12\): \(\sqrt{3 \cdot 12} = \sqrt{36} = 6\) &#10003;. The ancients heard this mean in music: pluck a string, then a string half its length, and the octave between them splits musically at the geometric mean. Ratios were the Greeks&rsquo; native mathematical language &mdash; this family is older than algebra itself.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The geometric family multiplies where the arithmetic family adds &mdash; and everything else follows from that one substitution: ratio in place of difference, power in place of product, curve in place of line, root in place of quotient when recovering the sequence from scattered terms. You can now detect the family, speak both of its languages, and command its explicit formula \(a_n = a_1 r^{\,n-1}\) with the same fluency you built for \(a_1 + (n-1)d\). Next lesson the family goes to work &mdash; on money that compounds, populations that grow by percent, and a ball whose every bounce is a fixed fraction of the last. Multiplication, you will find, runs the world&rsquo;s most interesting models.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What is the test for membership in the geometric family, and why must every consecutive pair pass it?</p>
+    <p>2. Why does the explicit formula carry \(r^{\,n-1}\) rather than \(r^n\) &mdash; and what quick test exposes the error either way?</p>
+    <p>3. What does a negative common ratio do to a sequence, and why does one number produce two behaviors at once?</p>
+    <p>4. In what precise ways is the geometric family the multiplicative mirror of the arithmetic family &mdash; formula, graph, mean, and method?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">1-6 &middot; Geometric Sequences</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

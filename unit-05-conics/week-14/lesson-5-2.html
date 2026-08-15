@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-2</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-2</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-2</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">The Circle: Equation, Graphs, Applications</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to derive the equation of a circle directly from the distance formula and explain what each symbol in \((x-h)^2 + (y-k)^2 = r^2\) records.</p></li>
+        <li><p>I will be able to write the equation of a circle from its center and radius, from a point it passes through, from the endpoints of a diameter, or from a real-world description.</p></li>
+        <li><p>I will be able to convert a circle's general form to standard form by completing the square, then graph it and locate points inside, on, or outside it.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Circle</strong>: The locus of all points in a plane at a fixed distance \(r\) (the <strong>radius</strong>) from a fixed point \((h, k)\) (the <strong>center</strong>). One sentence &mdash; the whole curve.</p>
+    <p><strong>Standard form</strong>: \((x-h)^2 + (y-k)^2 = r^2\) &mdash; the form that announces its center and radius openly.</p>
+    <p><strong>General form</strong>: \(x^2 + y^2 + Dx + Ey + F = 0\) &mdash; the same circle with everything expanded and scrambled. It keeps its secrets until the square is completed.</p>
+    <p><strong>Completing the square</strong>: The Unit 2 technique &mdash; add \(\left(\frac{b}{2}\right)^2\) to turn \(x^2 + bx\) into the perfect square \(\left(x + \frac{b}{2}\right)^2\) &mdash; returning this week as the master key of the whole unit.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>The circle is the oldest locus in mathematics, and for two thousand years it needed no equation at all. Euclid's third postulate simply grants the right &ldquo;to describe a circle with any center and distance&rdquo; &mdash; and the compass in your desk drawer is that postulate made of metal: pin down the center, fix the distance, sweep. The pin is \((h,k)\); the fixed opening is \(r\); every point the pencil visits satisfies one condition, <em>my distance from the pin is exactly \(r\)</em>. What the Greeks could only draw, <strong>Ren&eacute; Descartes</strong> taught the world to <em>write</em>: his <em>G&eacute;om&eacute;trie</em> of 1637 married algebra to geometry through coordinates, so that a geometric condition could be frozen into an equation. Today we perform that marriage on the compass itself.</p>
+
+    <p>The officiant is the <strong>distance formula</strong> &mdash; which is nothing but the Pythagorean theorem wearing coordinates. A point \((x, y)\) lies on the circle with center \((h,k)\) and radius \(r\) exactly when its distance to the center equals \(r\):</p>
+    <p style="text-align: center;">\(\sqrt{(x-h)^2 + (y-k)^2} = r\)</p>
+    <p>Both sides are distances, hence nonnegative &mdash; so squaring both sides is fully reversible. (Remember Unit 3, where squaring an equation with a possibly negative side let ghost solutions in? Here both sides are certified \(\geq 0\) before we square, so no ghosts can enter. The discipline is knowing <em>when</em> the danger exists, not fearing the operation everywhere.) Squaring:</p>
+    <p style="text-align: center;">\((x-h)^2 + (y-k)^2 = r^2\)</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>The Circle, Standard Form</strong></h4>
+        <p style="text-align: center; font-size: 19px;">\((x-h)^2 + (y-k)^2 = r^2\)</p>
+        <ul>
+            <li><strong>Center:</strong> \((h, k)\) &mdash; read with flipped signs: \((x-3)^2\) means \(h = 3\); \((y+2)^2\) means \(k = -2\).</li>
+            <li><strong>Radius:</strong> \(r = \sqrt{\text{right side}}\) &mdash; the equation stores \(r^2\), not \(r\).</li>
+            <li><strong>Centered at the origin</strong> it collapses to \(x^2 + y^2 = r^2\) &mdash; the distance formula at its barest.</li>
+        </ul>
+        <p style="margin-bottom: 0;">This equation is nothing but the distance formula frozen in place. Every fact about a circle you will ever compute comes from un-freezing it.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Write the equation of the circle with center \((3, -2)\) and radius 4.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Substitute \(h = 3\), \(k = -2\), \(r = 4\) into standard form:</p>
+    <p style="text-align: center;">\((x - 3)^2 + (y - (-2))^2 = 4^2\)</p>
+    <p style="text-align: center;">\((x-3)^2 + (y+2)^2 = 16\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((x-3)^2 + (y+2)^2 = 16\). Watch the two traps in one line: the \(+2\) inside the parentheses records a center coordinate of \(-2\), and the right side is \(16\), not \(4\) &mdash; the equation stores the <em>square</em> of the radius.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Write the equation of the circle centered at \((-1, 5)\) that passes through the point \((1, 2)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The radius is the distance from center to the given point &mdash; but notice we only ever need \(r^2\), so we never need to un-square:</p>
+    <p style="text-align: center;">\(r^2 = (1 - (-1))^2 + (2 - 5)^2 = 2^2 + (-3)^2 = 4 + 9 = 13\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((x+1)^2 + (y-5)^2 = 13\). The radius itself is the irrational number \(\sqrt{13}\), and the equation never blinks: it wanted \(r^2\) all along. Check by substituting \((1,2)\): \((1+1)^2 + (2-5)^2 = 4 + 9 = 13\) &#10003;.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>The points \((-2, -1)\) and \((4, 7)\) are the endpoints of a diameter. Find the circle's equation.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The center is the <strong>midpoint</strong> of the diameter:</p>
+    <p style="text-align: center;">\(\left(\dfrac{-2+4}{2}, \dfrac{-1+7}{2}\right) = (1, 3)\)</p>
+    <p>The radius squared is the distance squared from the center to either endpoint &mdash; use \((4,7)\):</p>
+    <p style="text-align: center;">\(r^2 = (4-1)^2 + (7-3)^2 = 9 + 16 = 25\)</p>
+    <p>Honest check with the <em>other</em> endpoint: \((-2-1)^2 + (-1-3)^2 = 9 + 16 = 25\) &#10003; &mdash; both ends agree, as a true center must arrange.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \((x-1)^2 + (y-3)^2 = 25\); center \((1,3)\), radius 5.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Find the center and radius of the circle \(x^2 + y^2 - 6x + 4y - 12 = 0\), and describe its graph.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>This is general form &mdash; the circle with its identity scrambled. The master key from Unit 2, <strong>completing the square</strong>, unscrambles it. Group the \(x\)-terms and the \(y\)-terms, move the constant across, and complete each square, adding <em>to both sides</em>:</p>
+    <p style="text-align: center;">\((x^2 - 6x \phantom{+9}) + (y^2 + 4y \phantom{+4}) = 12\)</p>
+    <p style="text-align: center;">\(\left(\tfrac{-6}{2}\right)^2 = 9 \qquad \left(\tfrac{4}{2}\right)^2 = 4\)</p>
+    <p style="text-align: center;">\((x^2 - 6x + 9) + (y^2 + 4y + 4) = 12 + 9 + 4\)</p>
+    <p style="text-align: center;">\((x - 3)^2 + (y + 2)^2 = 25\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Center \((3, -2)\), radius \(\sqrt{25} = 5\). To graph it by hand: plot the center, then step \(5\) right, left, up, and down to the four compass points \((8,-2)\), \((-2,-2)\), \((3,3)\), \((3,-7)\), and sweep the curve through them. The general form hid all of this; two completed squares told the truth.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>What the Right Side Confesses</strong></h4>
+        <p>Complete the squares on any equation \(x^2 + y^2 + Dx + Ey + F = 0\) and you reach \((x-h)^2 + (y-k)^2 = c\) for some constant \(c\). Only now does the equation confess what it describes:</p>
+        <ul>
+            <li>\(c > 0\): a genuine <strong>circle</strong>, radius \(\sqrt{c}\);</li>
+            <li>\(c = 0\): a single <strong>point</strong> &mdash; the degenerate circle from Lesson 5-1, the sum of two squares forced to vanish;</li>
+            <li>\(c < 0\): <strong>no points at all</strong> &mdash; a sum of squares cannot be negative.</li>
+        </ul>
+        <p style="margin-bottom: 0;">A general form can look perfectly circular and describe nothing whatsoever. Unit 2's virtue was honesty about long-run behavior; this is the same honesty about existence &mdash; and only the completed square extracts the confession. There is also a second confession worth taking: a point \((a,b)\) lies <strong>inside</strong> the circle when \((a-h)^2 + (b-k)^2 < r^2\), <strong>on</strong> it at equality, and <strong>outside</strong> when the left side exceeds \(r^2\) &mdash; no picture required.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>A broadcast tower stands at \((5, -2)\) on a county map measured in miles, and its signal reaches 13 miles in every direction. Write the equation of the coverage boundary, and determine whether a house at \((10, 10)\) and a farm at \((-1, 3)\) receive the signal.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The boundary is the circle centered at the tower with radius 13:</p>
+    <p style="text-align: center;">\((x-5)^2 + (y+2)^2 = 169\)</p>
+    <p>Test each location against \(r^2 = 169\) &mdash; compare squared distances, never bothering with square roots:</p>
+    <p style="text-align: center;">House \((10, 10)\): \((10-5)^2 + (10+2)^2 = 25 + 144 = 169\) &mdash; exactly \(r^2\)</p>
+    <p style="text-align: center;">Farm \((-1, 3)\): \((-1-5)^2 + (3+2)^2 = 36 + 25 = 61 < 169\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The farm sits comfortably inside the coverage circle. The house sits <em>precisely on</em> the boundary &mdash; thirteen miles from the tower to the foot, the last address in the county the signal reaches. An engineer would not promise that house good reception; the mathematics says &ldquo;on the locus,&rdquo; and the honest report says &ldquo;at the very edge.&rdquo;</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: The Circle, Scrambled and Revealed</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), Desmos graphs <em>implicit</em> equations directly &mdash; no solving for \(y\) required. Put Example 4 on trial:</p>
+        <ol>
+            <li>Type the general form exactly as given: <strong>x^2 + y^2 - 6x + 4y - 12 = 0</strong>. A circle appears &mdash; but where is its center? The screen shows the shape; it does not announce \((h, k)\) or \(r\).</li>
+            <li>In the next line type your completed form: <strong>(x-3)^2 + (y+2)^2 = 25</strong>. It traces the <em>identical</em> curve &mdash; your algebra and the machine agree the two forms are one circle.</li>
+            <li>Now build the whole family: type <strong>(x-h)^2 + (y-k)^2 = r^2</strong> and click to create sliders for \(h\), \(k\), and \(r\). Drag \(h\) and \(k\) and watch the circle glide; drag \(r\) and watch it breathe. Set them to \(3\), \(-2\), \(5\) and land exactly on Example 4.</li>
+            <li>Finally, plot the points <strong>(10, 10)</strong> and <strong>(-1, 3)</strong> with the Example 5 circle <strong>(x-5)^2 + (y+2)^2 = 169</strong> and see the inside/on/outside verdicts you computed. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Find the center and radius of \(x^2 + y^2 + 8x - 2y + 8 = 0\). Complete both squares on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Group and move the constant: \((x^2 + 8x) + (y^2 - 2y) = -8\). Add \(\left(\frac{8}{2}\right)^2 = 16\) and \(\left(\frac{-2}{2}\right)^2 = 1\) to <em>both</em> sides: \((x+4)^2 + (y-1)^2 = -8 + 16 + 1 = 9\). Center \((-4, 1)\), radius 3.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Write the equation of the circle with center \((0, 3)\) and radius \(\sqrt{7}\), and decide &mdash; without graphing &mdash; whether \((2, 1)\) lies inside, on, or outside it.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Equation: \(x^2 + (y-3)^2 = 7\). Test \((2,1)\): \(2^2 + (1-3)^2 = 4 + 4 = 8 > 7\) &mdash; the point lies just <strong>outside</strong>, by the thinnest of margins. Squared distances settle it with no square roots and no sketch.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Completing the square on the left and forgetting the right: writing \((x^2 - 6x + 9) + (y^2 + 4y + 4) = 12\) after adding \(9\) and \(4\) to the left side only. An equation is a balance &mdash; whatever is added to one pan must be added to the other, or the equation now describes a <em>different circle</em> (here one of radius \(\sqrt{12}\) instead of 5). The companion trap is reading centers without flipping signs: \((x+4)^2\) puts the center at \(x = -4\), never \(+4\). The parentheses store \(x - h\); the center is what makes them vanish.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Euclid's <em>Elements</em> rests on just five postulates, and the third is the circle: the bare permission &ldquo;to describe a circle with any center and distance.&rdquo; Notice what it grants &mdash; not a formula, but a <em>locus condition</em>: a center and a distance are all a circle is. Twenty-two centuries later, when Descartes' coordinates arrived, that one Greek sentence compressed into six symbols: \((x-h)^2+(y-k)^2 = r^2\). The equation is the postulate, translated.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>One locus condition &mdash; <em>all points at distance \(r\) from the center</em> &mdash; passed through the distance formula and one safe squaring, and out came the circle's equation entire. From it you wrote circles out of centers, points, diameters, and county maps; and when the equation arrived scrambled as a general form, completing the square &mdash; the master key from Unit 2, back in service for the whole unit &mdash; revealed the center, the radius, and occasionally the confession that no circle exists at all. Tomorrow the locus condition changes by a single clause: instead of all points equidistant from one <em>point</em>, we collect all points equidistant from a point <strong>and a line</strong>. That small edit builds an entirely different curve &mdash; the parabola &mdash; and hands it two pieces of anatomy, a focus and a directrix, whose usefulness will still be paying dividends when this unit reaches satellite dishes and whispering galleries.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. In what precise sense is \((x-h)^2 + (y-k)^2 = r^2\) &ldquo;the distance formula frozen in place,&rdquo; and why does the equation store \(r^2\) rather than \(r\)?</p>
+    <p>2. Squaring both sides manufactured ghost solutions in Unit 3. Why is the squaring in today's derivation perfectly safe &mdash; what guarantees it?</p>
+    <p>3. What is completing the square actually doing, geometrically, when it converts a general form to standard form &mdash; and what do a zero or negative right side confess?</p>
+    <p>4. How do squared distances decide inside, on, or outside a circle without a single square root or sketch &mdash; and why did the Example 5 engineer still owe the edge house an honest warning?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-2 &middot; The Circle: Equation, Graphs, Applications</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 4-11</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 4</div>
+        <div style="font-size: 13px; color: #666;">Functional Relationships</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">4-11</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Functional Relationships</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">4-11</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Solving Problems with Inverses (Unit Synthesis)</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to solve real-world inverse problems &mdash; unit conversion, decoding, and cost-to-quantity &mdash; by constructing and evaluating the inverse of a modeling function.</p></li>
+        <li><p>I will be able to construct the logarithmic inverse of an exponential model by swap-and-solve, and use it to answer questions the forward function cannot answer directly.</p></li>
+        <li><p>I will be able to decide which direction of a functional relationship a question calls for, and verify every inverse answer against the forward function.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Inverse problem</strong>: A question that hands you an <em>output</em> and asks for the <em>input</em> that produced it &mdash; &ldquo;how many pages can I print for \$30?&rdquo; rather than &ldquo;what do 120 pages cost?&rdquo; Solving one means evaluating the inverse function.</p>
+    <p><strong>Encode / decode</strong>: To encode is to apply a function to a message; to decode is to apply its inverse. A code is usable exactly when its encoding function is one-to-one &mdash; otherwise two messages could wear the same disguise.</p>
+    <p><strong>Logarithm</strong> <em>(review from Unit 3)</em>: \(\log_b x\) is the exponent to which \(b\) must be raised to produce \(x\). In Unit 3 you were told it is the inverse of the exponential function; today that title becomes a theorem you can derive.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Leibniz &mdash; this unit's presiding spirit &mdash; spent his life on reversals. He dreamed of a <em>characteristica universalis</em>, a symbolic language in which any idea could be encoded and any encoding read back; he built one of the first mechanical calculators, whose gears turned arithmetic forward and its results back into answers; and in 1703 he published the arithmetic of base two, the binary code in which every message your device sends tonight is encoded and decoded, billions of times a second. Behind all of it sits one requirement: <strong>a transformation is only as useful as its undoing</strong>. A cipher no one can decode is noise. A formula that converts Celsius to Fahrenheit but cannot be run backward answers only half the world's questions. Today, the unit's closing lesson puts inverses to work &mdash; and settles an account left open since Unit 3.</p>
+    <p>Here is the working distinction. A <em>forward</em> question hands you an input and asks for the output: evaluate. An <em>inverse</em> question hands you an output and asks for the input: invert, then evaluate. Most real situations ask both, which is why a model without its inverse is half a tool.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>The conversion from Celsius to Fahrenheit is \(F(C) = \tfrac{9}{5}C + 32\). Construct the inverse, verify it, and use each direction once.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Swap and solve (keeping the variable names meaningful &mdash; solve \(F = \tfrac{9}{5}C + 32\) for \(C\)):</p>
+    <p style="text-align: center;">\(F - 32 = \tfrac{9}{5}C \;\;\Rightarrow\;\; C = \tfrac{5}{9}(F - 32)\)</p>
+    <p>Note the courtesy of order: the forward function multiplies <em>then</em> adds; the inverse subtracts <em>then</em> multiplies &mdash; each step undone in reverse. Verify with the two anchor points every scientist knows: water boils at \(C = 100\), and \(F(100) = 180 + 32 = 212\); running backward, \(C(212) = \tfrac{5}{9}(180) = 100\) &#10003;. Body temperature: \(F(37) = 66.6 + 32 = 98.6\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(C(F) = \tfrac{5}{9}(F - 32)\). Forward question: &ldquo;It is \(37^\circ\)C in Rome &mdash; what is that in Fahrenheit?&rdquo; \(98.6^\circ\)F. Inverse question: &ldquo;My American recipe says \(212^\circ\)F &mdash; what is that in Celsius?&rdquo; \(100^\circ\)C. One relationship, two directions, both needed &mdash; which is why every conversion table ever printed is really a function and its inverse sharing a page.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A print shop charges a \$12 setup fee plus \$0.15 per page, so an order of \(n\) pages costs \(C(n) = 0.15n + 12\) dollars. You have \$30. How many pages can you order?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The question hands us an output (a cost) and asks for the input (a page count) &mdash; an inverse problem. Construct the inverse:</p>
+    <p style="text-align: center;">\(C = 0.15n + 12 \;\;\Rightarrow\;\; C - 12 = 0.15n \;\;\Rightarrow\;\; n(C) = \dfrac{C - 12}{0.15}\)</p>
+    <p>Evaluate at the budget: \(n(30) = \dfrac{30 - 12}{0.15} = \dfrac{18}{0.15} = 120\).</p>
+    <p><strong>Judge the answer with the forward function</strong> &mdash; the standing habit of this lesson: \(C(120) = 0.15(120) + 12 = 18 + 12 = 30\) &#10003;. Exactly the budget.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> 120 pages. Notice who asks which direction: the shop's clerk needs \(C(n)\) &mdash; pages in, price out. The customer with a budget needs \(n(C)\) &mdash; price in, pages out. The forward function answers the seller's question; the inverse answers the buyer's. Courtesy, in commercial form: the relationship serves both parties only because it runs both ways.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Closing the Unit 3 Loop: the Logarithm Was an Inverse All Along</strong></h4>
+        <p>In Unit 3 you met the logarithm with a promissory note attached. You were <em>told</em>: &ldquo;\(\log_b x\) is the inverse of \(b^x\)&rdquo; &mdash; and on that authority you solved exponential equations all October. The note comes due today, because you now own the machinery to <strong>derive</strong> what you then had to accept.</p>
+        <p>Run swap-and-solve on the exponential parent \(y = b^x\): swapping gives \(x = b^y\), and solving for \(y\) asks &mdash; say it precisely &mdash; <em>&ldquo;to what exponent must \(b\) be raised to produce \(x\)?&rdquo;</em> That question <strong>is the definition of the logarithm</strong>. There is nothing to compute; the inverse of the exponential is not <em>found</em> to be the logarithm, it is <em>named</em> the logarithm:</p>
+        <p style="text-align: center;">\(y = b^x \quad\xrightarrow{\text{swap-and-solve}}\quad y = \log_b x\)</p>
+        <ul>
+            <li>Every log property you used in Unit 3 is an inverse fact in disguise: \(\log_b(b^x) = x\) and \(b^{\log_b x} = x\) are exactly the two composition checks, \(f^{-1}(f(x)) = x\) and \(f(f^{-1}(x)) = x\).</li>
+            <li>The Inverse Dictionary explains the log graph you memorized: the exponential's domain \((-\infty,\infty)\) and range \((0,\infty)\) exchange into the log's domain \((0,\infty)\) and range \((-\infty,\infty)\); the exponential's horizontal asymptote \(y = 0\) reflects into the log's vertical asymptote \(x = 0\); the two graphs mirror across \(y = x\).</li>
+            <li>And the exponential needed no domain restriction &mdash; it passes the horizontal line test on all of \(\mathbb{R}\) &mdash; which is why the logarithm, unlike yesterday's square roots and next spring's arcsine, comes with no branch to choose.</li>
+        </ul>
+        <p style="margin-bottom: 0;">A title became a theorem. That is what this unit was for.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>A bacteria culture starts at 500 cells and doubles every 3 hours, so its population is \(P(t) = 500 \cdot 2^{t/3}\). Construct the inverse function, and use it to answer: <em>when</em> does the population reach 32,000?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The forward function answers &ldquo;how many at time \(t\)?&rdquo; instantly &mdash; \(P(12) = 500 \cdot 2^4 = 8000\). But &ldquo;<em>when</em> do we hit 32,000?&rdquo; hands us an output and demands an input, and no amount of evaluating \(P\) forward answers it directly. Construct the inverse by swap-and-solve, using Unit 3's machinery at the crucial step:</p>
+    <p style="text-align: center;">\(P = 500 \cdot 2^{t/3}\)</p>
+    <p style="text-align: center;">\(\dfrac{P}{500} = 2^{t/3}\)</p>
+    <p style="text-align: center;">\(\log_2\!\left(\dfrac{P}{500}\right) = \dfrac{t}{3} \;\;\Rightarrow\;\; t(P) = 3\log_2\!\left(\dfrac{P}{500}\right)\)</p>
+    <p>Evaluate at the target: \(t(32000) = 3\log_2\!\left(\dfrac{32000}{500}\right) = 3\log_2 64 = 3 \cdot 6 = 18\).</p>
+    <p><strong>Judge with the forward function:</strong> \(P(18) = 500 \cdot 2^{18/3} = 500 \cdot 2^6 = 500 \cdot 64 = 32{,}000\) &#10003;.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> 18 hours. Read the inverse formula as a sentence and it tells you its own story: <em>how many doublings does it take (\(\log_2\) of the growth factor), times the length of each doubling (3 hours)?</em> The logarithm is not a button on your calculator; it is the &ldquo;when?&rdquo; function &mdash; the inverse that unlocks every question the exponential model can only answer backward.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A classmate encodes messages by numbering the letters A \(= 1\) through Z \(= 26\) and applying \(E(n) = 3n + 2\) to each letter's number. You receive the transmission <strong>41, 5, 62, 26</strong>. Decode it.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Decoding is evaluating the inverse. Construct it: \(c = 3n + 2\) gives \(n(c) = \dfrac{c - 2}{3}\). Apply it to each code number, judging each against the forward function as you go:</p>
+    <p style="text-align: center;">\(n(41) = \dfrac{39}{3} = 13 = \text{M} \qquad (\text{check: } 3 \cdot 13 + 2 = 41\ \checkmark)\)</p>
+    <p style="text-align: center;">\(n(5) = \dfrac{3}{3} = 1 = \text{A} \qquad\;\; (3 \cdot 1 + 2 = 5\ \checkmark)\)</p>
+    <p style="text-align: center;">\(n(62) = \dfrac{60}{3} = 20 = \text{T} \qquad (3 \cdot 20 + 2 = 62\ \checkmark)\)</p>
+    <p style="text-align: center;">\(n(26) = \dfrac{24}{3} = 8 = \text{H} \qquad\; (3 \cdot 8 + 2 = 26\ \checkmark)\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> <strong>MATH.</strong> The cipher works for exactly one reason: \(E(n) = 3n + 2\) is one-to-one, so no two letters ever share a code number and every transmission decodes unambiguously. A code built on \(E(n) = (n - 13)^2\) would be a disaster &mdash; A and Z would both encode to 144, and the receiver could never tell them apart. <strong>One-to-one is not a technicality; it is the difference between a language and noise</strong> &mdash; which Leibniz, dreaming of his universal encoding, understood three centuries before the first computer blinked on.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: JUDGE THE INVERSE BY THE FORWARD FUNCTION</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student asked an AI: &ldquo;A culture obeys \(P(t) = 500 \cdot 2^{t/3}\). When does it reach 16,000?&rdquo; It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;Set \(500 \cdot 2^{t/3} = 16000\). Taking log base 2 of both sides: \(\frac{t}{3} = \frac{\log_2 16000}{\log_2 500} \approx \frac{13.97}{8.97} \approx 1.56\), so <strong>\(t \approx 4.67\) hours</strong>.&rdquo;</p>
+            <p>The prose sounds fluent and the arithmetic inside it is genuinely correct &mdash; \(\log_2 16000 \approx 13.97\) and \(\log_2 500 \approx 8.97\) are both right. Now judge the answer the way this lesson taught you: <strong>feed it back through the forward function.</strong> \(P(4.67) = 500 \cdot 2^{4.67/3} \approx 500 \cdot 2^{1.56} \approx 500 \cdot 2.94 \approx 1470\) cells &mdash; nowhere near 16,000. The answer is off by a factor of ten, and one substitution exposed it.</p>
+            <p>The flaw: dividing both sides by 500 <em>before</em> taking logs gives \(2^{t/3} = 32\), so \(\frac{t}{3} = \log_2 32 = 5\) and \(t = 15\) (check: \(500 \cdot 2^5 = 16{,}000\) &#10003;). The AI instead took logs immediately and then wrote \(\log_2\!\big(\frac{16000}{500}\big)\) as \(\frac{\log_2 16000}{\log_2 500}\) &mdash; <strong>the log of a quotient is a <em>difference</em> of logs, never a quotient of logs</strong>: \(13.97 - 8.97 = 5\), which is the correct exponent, sitting right there inside the AI's own numbers.</p>
+            <p style="margin-bottom: 0;">Name the pattern, because it is the third time you have caught it this unit: fluent execution wrapped around one corrupted property &mdash; the same failure shape as 4-2's difference-quotient audit and 3-7's refuted &ldquo;log of a sum.&rdquo; And note what caught it: not re-reading the AI's algebra, but <strong>one honest substitution into the forward function</strong>. Every inverse answer carries its own verification, for machines and mathematicians alike. On this week's Focus set, you will write this examiner's report yourself on a fresh transcript.</p>
+        </div>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Which Function Answers the Question?</strong></h4>
+        <p style="margin-bottom: 8px;">The synthesis habit, in three lines &mdash; carry it into Thursday's test and every model you ever build:</p>
+        <ul style="margin-bottom: 0;">
+            <li><strong>Given an input, asked for an output</strong> (&ldquo;what will 200 pages cost?&rdquo; &ldquo;how many cells at noon?&rdquo;) &rarr; evaluate the <strong>forward</strong> function.</li>
+            <li><strong>Given an output, asked for an input</strong> (&ldquo;what can \$30 buy?&rdquo; &ldquo;<em>when</em> do we reach 32,000?&rdquo; &ldquo;what did this code say?&rdquo;) &rarr; construct and evaluate the <strong>inverse</strong>.</li>
+            <li><strong>Either way, the other direction is your judge:</strong> every inverse answer is verified by one substitution into the forward function, and the verification is part of the solution, not an ornament on it.</li>
+        </ul>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A tutor charges a \$45 registration fee plus \$60 per hour, so \(c(m) = 60m + 45\). How many hours does \$285 buy? Construct the inverse, evaluate, and judge. Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Inverse: \(m(c) = \dfrac{c - 45}{60}\). Evaluate: \(m(285) = \dfrac{240}{60} = 4\) hours. Judge with the forward function: \(c(4) = 240 + 45 = 285\) &#10003;.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: An account grows by \(A(t) = 1000 \cdot 3^{t/5}\). Construct the inverse by swap-and-solve, then find when the balance reaches \$27,000.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Swap-and-solve: \(\dfrac{A}{1000} = 3^{t/5}\), so \(t(A) = 5\log_3\!\left(\dfrac{A}{1000}\right)\). Evaluate: \(t(27000) = 5\log_3 27 = 5 \cdot 3 = 15\) years. Judge: \(A(15) = 1000 \cdot 3^3 = 27{,}000\) &#10003;.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Undoing the steps in the <em>same</em> order the function applied them. Faced with \(F = 1.8C + 32\), the tempting wrong inverse is \(C = \dfrac{F}{1.8} - 32\) &mdash; divide first, subtract second, matching the forward order. Test it and it fails loudly: at \(F = 212\) it gives \(\dfrac{212}{1.8} - 32 \approx 85.8\), not \(100\). The forward function multiplies <em>then</em> adds, so the inverse must subtract <em>then</em> divide &mdash; last step undone first, like shoes before socks: \(C = \dfrac{F - 32}{1.8} = 100\) &#10003;. One forward substitution catches the error every time &mdash; which is precisely why the judging step is method, not decoration.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Leibniz saw theology in base two: he wrote that binary imaged creation itself &mdash; unity and nothing, 1 and 0, sufficing to build every number. He even sent his binary arithmetic to missionaries in China, convinced it echoed the broken and unbroken lines of the ancient <em>I Ching</em> hexagrams. Three centuries later his two digits, endlessly encoded and decoded by inverse functions running in silicon, carry nearly every word, image, and equation on Earth &mdash; including this sentence, decoded for you a moment ago.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Step back and see the unit whole, because Thursday's test will ask you to. Functional relationships began with <em>change</em>: average rates and the difference quotient, Leibniz's doorstep to the calculus. Then functions learned to <em>combine</em> &mdash; arithmetic, then composition, processes chained in careful order with domains negotiated at every joint. And composition's crowning case was the <em>inverse</em>: the function that composes with its partner to give back \(x\) itself, found by swap-and-solve, graphed in the mirror of \(y = x\), rescued by domain restriction when the graph folds, and put to work today on temperatures, budgets, ciphers, and time itself. The unit's virtue was courtesy, and its mathematics kept proving the point: composition is functions cooperating in sequence, and an inverse is the deepest courtesy a function can be shown &mdash; its every result honored, its every output walked home. Along the way a debt was paid: the logarithm, accepted on faith in October, is now a theorem you can derive in two lines.</p>
+    <p>This is the material of this week's <strong>Focus assignment</strong> &mdash; the one set your teacher grades for method &mdash; and of Thursday's unit test, which gathers all eleven lessons into one sitting. After that, the course changes key. For thirteen weeks the formula has come first and the curve second: we wrote rules and then drew their graphs. Unit 5 turns the telescope around. A circle, an ellipse, a parabola in its fullest sense &mdash; these are not defined by formulas at all, but by <em>geometric relationships</em>: the set of all points a fixed distance from a center; the points whose distances to two foci keep a constant sum. The shape comes first, born of a distance condition in the plane, and the equation must be <em>derived</em> from the geometry. The ancient Greeks knew these curves two thousand years before anyone could write their equations &mdash; and next week, standing where Apollonius stood, you will slice a cone and watch all of them fall out.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. How do you recognize an inverse problem in the wild &mdash; what grammatical shape does a question have when it is really asking for \(f^{-1}\)?</p>
+    <p>2. In what precise sense was the logarithm an inverse all along &mdash; and what does swap-and-solve reveal that Unit 3's &ldquo;take the log of both sides&rdquo; procedure concealed?</p>
+    <p>3. Why is one-to-one-ness the difference between a cipher and noise &mdash; and where else this week has the same requirement appeared wearing different clothes?</p>
+    <p>4. Every inverse answer can be judged by one substitution into the forward function. Why does this verification work, and why should it be performed even when &mdash; especially when &mdash; the answer comes from a machine?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">4-11 &middot; Solving Problems with Inverses (Unit Synthesis)</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

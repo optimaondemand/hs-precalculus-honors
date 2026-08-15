@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 5-7</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q2 &middot; Unit 5</div>
+        <div style="font-size: 13px; color: #666;">Conics</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">5-7</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Conics</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">5-7</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Graphing Ellipses</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to graph an ellipse centered anywhere, locating its center, vertices, co-vertices, and foci from standard form.</p></li>
+        <li><p>I will be able to convert an ellipse from general form to standard form by completing the square &mdash; the master key of this unit &mdash; with every added constant accounted for honestly.</p></li>
+        <li><p>I will be able to compute and interpret eccentricity \(e = \frac{c}{a}\) as the single number that measures an ellipse's shape.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Standard form</strong>: \(\frac{(x-h)^2}{a^2} + \frac{(y-k)^2}{b^2} = 1\) (or with \(a^2\) under the \(y\)-term) &mdash; the form that wears its geometry openly: center \((h,k)\), semi-axes \(a\) and \(b\).</p>
+    <p><strong>General form</strong>: \(Ax^2 + Cy^2 + Dx + Ey + F = 0\) with \(A\) and \(C\) both positive (and unequal) &mdash; the same ellipse with its geometry scrambled into one line. Completing the square unscrambles it.</p>
+    <p><strong>Eccentricity</strong>: The ratio \(e = \frac{c}{a}\), with \(0 \leq e < 1\) for every ellipse &mdash; from the Latin <em>ex centro</em>, &ldquo;out of center&rdquo;: literally, how far off-center the foci sit, as a fraction of the curve's half-length.</p>
+    <p><strong>Semi-major / semi-minor axis</strong>: The half-lengths \(a\) and \(b\); on a centered-anywhere ellipse they are measured from \((h, k)\) along and across the major axis.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday's derivation pinned the ellipse to the origin, but the universe is under no such obligation &mdash; the orbits, arches, and whispering chambers we meet tomorrow are centered wherever they please. The remedy is the same shift-of-center you have used since Algebra 2: replace \(x\) with \(x - h\) and \(y\) with \(y - k\), and every feature of the ellipse packs up and moves with the center. And when an ellipse arrives with its equation scrambled into general form, the tool that restores order is the one this unit has leaned on since the circle in Lesson 5-2: <strong>completing the square</strong>, the master key that has now opened three of the four conics. There is also a payoff waiting at the end of today's work &mdash; a single number, the <em>eccentricity</em>, that captures the shape of any ellipse: how round, how flattened, how far its foci have wandered out of center. Astronomers describe every orbit in the solar system with it, and tomorrow so will you.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Reading an Ellipse at Sight</strong></h4>
+        <p>From \(\frac{(x-h)^2}{\square} + \frac{(y-k)^2}{\square} = 1\):</p>
+        <ul>
+            <li><strong>Center:</strong> \((h, k)\) &mdash; the values that zero each parenthesis.</li>
+            <li><strong>\(a^2\) is the larger denominator, wherever it sits.</strong> Under the \(x\)-term: major axis horizontal. Under the \(y\)-term: vertical. Orientation is a fact about sizes, never about which variable was written first.</li>
+            <li><strong>Vertices:</strong> \(a\) units from center along the major axis. <strong>Co-vertices:</strong> \(b\) units along the minor axis.</li>
+            <li><strong>Foci:</strong> \(c\) units from center along the major axis, with \(c^2 = a^2 - b^2\) &mdash; yesterday's right triangle, relocated but unchanged.</li>
+        </ul>
+        <p style="margin-bottom: 0;">Four dots and two axis-lengths: with the center, two vertices, and two co-vertices plotted, the ellipse practically draws itself.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Graph \(\dfrac{x^2}{9} + \dfrac{y^2}{25} = 1\), locating all key points, and find its eccentricity.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Center \((0, 0)\). The larger denominator, 25, sits under \(y^2\): the major axis is <strong>vertical</strong>, with \(a = 5\) and \(b = 3\). Then</p>
+    <p style="text-align: center;">\(c^2 = a^2 - b^2 = 25 - 9 = 16 \;\;\Rightarrow\;\; c = 4\)</p>
+    <p>Vertices \((0, \pm 5)\); co-vertices \((\pm 3, 0)\); foci \((0, \pm 4)\), on the major axis, inside the curve. Plot the four extreme points and sweep the oval through them.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Eccentricity \(e = \dfrac{c}{a} = \dfrac{4}{5} = 0.8\) &mdash; a noticeably elongated ellipse, its foci four-fifths of the way from center to vertex.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Graph \(\dfrac{(x-2)^2}{16} + \dfrac{(y+1)^2}{7} = 1\), locating center, vertices, co-vertices, and foci exactly.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Center \((2, -1)\) &mdash; note the sign flip: \(y + 1 = y - (-1)\). The larger denominator, 16, is under the \(x\)-term: major axis <strong>horizontal</strong>, \(a = 4\), \(b = \sqrt{7}\).</p>
+    <p style="text-align: center;">\(c^2 = 16 - 7 = 9 \;\;\Rightarrow\;\; c = 3\)</p>
+    <p>March out from the center: vertices 4 left and right, \((-2, -1)\) and \((6, -1)\); co-vertices \(\sqrt{7} \approx 2.65\) up and down, \((2, -1 \pm \sqrt{7})\); foci 3 left and right, \((-1, -1)\) and \((5, -1)\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(e = \dfrac{3}{4} = 0.75\). Keep \(\sqrt{7}\) exact on the page and use the decimal only to place the pencil &mdash; exact values are the argument; decimals are just the drawing aid.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span> &mdash; The Master Key</h4>
+    <p>Write \(4x^2 + 9y^2 - 16x + 18y - 11 = 0\) in standard form and graph it.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Group by variable and factor out each leading coefficient &mdash; <em>all the way out, before any squares are completed</em>:</p>
+    <p style="text-align: center;">\(4(x^2 - 4x) + 9(y^2 + 2y) = 11\)</p>
+    <p>Complete each square, and account for what was really added. Inside the first parentheses we add 4 &mdash; but it sits inside a factor of 4, so the left side truly gained \(4 \cdot 4 = 16\). Inside the second we add 1, inside a factor of 9: truly \(9\). Balance both:</p>
+    <p style="text-align: center;">\(4(x^2 - 4x + 4) + 9(y^2 + 2y + 1) = 11 + 16 + 9\)</p>
+    <p style="text-align: center;">\(4(x - 2)^2 + 9(y + 1)^2 = 36\)</p>
+    <p>Divide by 36 to reach the &ldquo;\(= 1\)&rdquo; that standard form demands:</p>
+    <p style="text-align: center;">\(\frac{(x-2)^2}{9} + \frac{(y+1)^2}{4} = 1\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Center \((2, -1)\); horizontal major axis with \(a = 3\), \(b = 2\); \(c^2 = 9 - 4 = 5\), so foci \(\left(2 \pm \sqrt{5}, -1\right)\); vertices \((-1, -1)\) and \((5, -1)\); co-vertices \((2, 1)\) and \((2, -3)\); eccentricity \(e = \frac{\sqrt{5}}{3} \approx 0.745\). One completed square turned a five-term scramble into a portrait.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Write the equation of the ellipse with vertices \((\pm 8, 0)\) and eccentricity \(e = \frac{1}{2}\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>From the vertices: center at the origin, horizontal major axis, \(a = 8\). Eccentricity now works in reverse:</p>
+    <p style="text-align: center;">\(e = \frac{c}{a} \;\;\Rightarrow\;\; c = ea = \tfrac{1}{2}(8) = 4\)</p>
+    <p style="text-align: center;">\(b^2 = a^2 - c^2 = 64 - 16 = 48\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{x^2}{64} + \dfrac{y^2}{48} = 1\), foci \((\pm 4, 0)\). An eccentricity of one-half sounds substantial, yet \(b = \sqrt{48} \approx 6.9\) &mdash; this ellipse is still nearly seven-eighths as tall as it is long. Eccentricity must grow quite large before the eye notices; hold that thought for tomorrow's orbits.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: Eccentricity Is the Shape Number</strong></h4>
+        <p>For every ellipse, \(e = \dfrac{c}{a}\) and \(0 \leq e < 1\):</p>
+        <ul>
+            <li>\(e = 0\) forces \(c = 0\): the foci merge at the center, \(b = a\), and the ellipse <em>is</em> a circle &mdash; the circle is not a rival to the ellipse but its roundest member.</li>
+            <li>As \(e \to 1\), the foci flee toward the vertices and the curve flattens toward a segment &mdash; but \(e = 1\) is never reached: that boundary belongs to the parabola, as the unit's honors extension will show.</li>
+            <li>Two ellipses with the same \(e\) are the same <em>shape</em> &mdash; one is a scaled photograph of the other, whatever their sizes.</li>
+        </ul>
+        <p style="margin-bottom: 0;">One number, the whole silhouette. Earth's orbit: \(e = 0.017\). Halley's comet: \(e = 0.97\). Tomorrow those two numbers will do a great deal of talking.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: The Portrait and the Scramble</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below):</p>
+        <ol>
+            <li><strong>Audit Example 3.</strong> Desmos graphs implicit equations directly &mdash; type the general form exactly as given: <strong>4x&sup2; + 9y&sup2; - 16x + 18y - 11 = 0</strong>. Then type your standard form: <strong>(x-2)&sup2;/9 + (y+1)&sup2;/4 = 1</strong>. If your completing-the-square was honest, the two graphs land <em>exactly</em> on top of each other &mdash; one curve, two costumes. If two curves appear, an added constant went unbalanced; hunt it down.</li>
+            <li><strong>Build the family.</strong> Add sliders <strong>h, k, a, b</strong> and graph <strong>(x-h)&sup2;/a&sup2; + (y-k)&sup2;/b&sup2; = 1</strong>. Drag \(h\) and \(k\) &mdash; the whole portrait travels; drag \(a\) past \(b\) and back &mdash; watch the major axis flip orientation the instant the larger denominator changes owners.</li>
+            <li><strong>Watch eccentricity work.</strong> With a slider <strong>e</strong> on \((0, 1)\), graph <strong>x&sup2;/a&sup2; + y&sup2;/(a&sup2;(1-e&sup2;)) = 1</strong> and plot the foci <strong>(-ae, 0)</strong> and <strong>(ae, 0)</strong>. Slide \(e\) from 0.05 to 0.95: circle, oval, cigar &mdash; and the foci racing outward. The calculator confirms; your algebra convinces.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Graph \(\frac{(x-4)^2}{25} + \frac{y^2}{9} = 1\) &mdash; center, vertices, foci, eccentricity. One focus lands somewhere memorable.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Center \((4, 0)\); horizontal, \(a = 5\), \(b = 3\), \(c^2 = 25 - 9 = 16\), \(c = 4\). Vertices \((-1, 0)\) and \((9, 0)\); co-vertices \((4, \pm 3)\); foci \((0, 0)\) and \((8, 0)\) &mdash; one focus is the origin itself. \(e = \frac{4}{5}\). (An ellipse described by its focus rather than its center is exactly how astronomy will hand them to you tomorrow: the sun sits at a focus, not at the center.)
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Write \(9x^2 + y^2 - 18x - 4y + 4 = 0\) in standard form, then give center, orientation, foci, and eccentricity.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(9(x^2 - 2x) + (y^2 - 4y) = -4\); complete: \(9(x-1)^2 - 9 + (y-2)^2 - 4 = -4\), so \(9(x-1)^2 + (y-2)^2 = 9\), giving \(\frac{(x-1)^2}{1} + \frac{(y-2)^2}{9} = 1\). Center \((1, 2)\); vertical major axis, \(a = 3\), \(b = 1\); \(c^2 = 8\), \(c = 2\sqrt{2}\); foci \((1,\ 2 \pm 2\sqrt{2})\); \(e = \frac{2\sqrt{2}}{3} \approx 0.943\) &mdash; a tall, narrow ellipse, and the added constants (\(9\) and \(4\), not \(1\) and \(4\)) both balanced.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Completing the square inside a factored group and balancing only the <em>inside</em> number. In \(4(x^2 - 4x)\), adding 4 inside the parentheses adds \(4 \times 4 = 16\) to the equation &mdash; the factor multiplies everything it touches, including your new constant. Balance with 4 instead of 16 and the right side is wrong by 12; the &ldquo;ellipse&rdquo; that follows has the wrong size, wrong \(c\), wrong everything, while every individual step <em>looks</em> tidy. The bookkeeping line &mdash; &ldquo;added \(4 \cdot 4 = 16\) and \(9 \cdot 1 = 9\)&rdquo; &mdash; is not scratch work; write it, every time. Then let Desmos audit you: graph both forms, and demand one curve.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Earth's orbit has eccentricity \(0.0167\). Drawn to scale on this page, it would be indistinguishable from a perfect circle &mdash; the flattening is about one part in seven thousand, far finer than any pencil line. What is <em>not</em> negligible is where the sun sits: about 2.5 million kilometers off-center. An ellipse can hide its shape from the eye and still refuse to put its star in the middle &mdash; which is why it took a Kepler, and not just a sharp glance, to discover the truth. That story is tomorrow's lesson.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The ellipse now travels: standard form reads at sight &mdash; center, larger-denominator rule, four extreme points, foci from the unchanging right triangle &mdash; and general form surrenders to completing the square, the master key that has now opened the circle, the parabola, and the ellipse alike, with the factored-coefficient bookkeeping done honestly and audited in Desmos. And you met eccentricity, the one number that is an ellipse's whole silhouette: \(0\) for the circle, racing toward \(1\) for the cigar, identical for any two ellipses of the same shape. Tomorrow the ellipse goes to work &mdash; and the work is glorious: chambers that carry a whisper eighty feet to a waiting ear, and the planets themselves, which have been tracing ellipses around a focus &mdash; not a center &mdash; since long before anyone proved it. Bring your VR headset; you are going to stand at a focus and hear the theorem.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does the <em>larger denominator</em> &mdash; and never the order of the variables &mdash; determine which way the major axis runs?</p>
+    <p>2. Completing the square has now unlocked the circle, the parabola, and the ellipse. What, exactly, does it accomplish for a conic in general form &mdash; what does it find, and what does it discard?</p>
+    <p>3. Two ellipses share the same \(a\) but have \(e = 0.1\) and \(e = 0.9\). What do they share, what differs, and where are their foci?</p>
+    <p>4. Why does \(e = 0\) force a circle &mdash; and why can an ellipse's eccentricity approach 1 but never arrive?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 2 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">5-7 &middot; Graphing Ellipses</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

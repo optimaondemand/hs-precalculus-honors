@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 2-6</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 2</div>
+        <div style="font-size: 13px; color: #666;">Polynomial and Rational Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">2-6</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polynomial and Rational Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">2-6</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Modeling and Fitting Polynomial Functions</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to build a polynomial model from a geometric situation, state its domain of honesty, and solve questions with it.</p></li>
+        <li><p>I will be able to fit a polynomial trendline to real data in Excel and interpret what the fit does &mdash; and does not &mdash; certify.</p></li>
+        <li><p>I will be able to judge when a polynomial model is honest and when it merely fits: form from structure, predictions tested against sense, domain named.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Mathematical model</strong>: A function chosen to stand in for a real situation, so that questions about the situation become questions about the function.</p>
+    <p><strong>Domain of honesty</strong>: The set of inputs where the model's answers deserve trust &mdash; usually narrower than the function's algebraic domain.</p>
+    <p><strong>Trendline (regression fit)</strong>: The polynomial of a chosen degree that comes closest to a set of data points, computed by software.</p>
+    <p><strong>Overfitting</strong>: Making a model complicated enough to match every wobble of the data &mdash; including the wobbles that are noise, not structure.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>In 1613, Johannes Kepler &mdash; between working out the orbits of the planets &mdash; got married, bought wine for the wedding, and grew suspicious of how the merchant measured the barrel. The merchant poked a rod diagonally into the barrel and read off a number. Could one length honestly measure a volume? Kepler went home and wrote a small book, <em>Nova stereometria doliorum vinariorum</em> (&ldquo;New solid geometry of wine barrels&rdquo;), working out barrel volumes and discovering along the way which barrel shape holds the most wine for a given rod measurement. It is one of history's finest examples of the modeling instinct: <em>a real question, a function built to answer it, and an honest reckoning of where the function can be trusted.</em></p>
+    <p>Today you do exactly that, with a problem you can hold in your hands. Take a rectangular sheet of card &mdash; say <strong>20 cm by 16 cm</strong>. Cut equal squares of side \(x\) from the four corners, fold up the flaps, and you have an open-top box. Small cut: a wide, shallow tray. Big cut: a tall, skinny tube. Somewhere in between hides the box of greatest volume. <em>Before any algebra &mdash; write down your guess for the best \(x\).</em> Keep it; you will grade it shortly, and on this unit's applied task you will grade an AI's guess the same way.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Build the volume model for the box, and state its domain of honesty.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>Define the variables in words first:</em> let \(x\) be the side of each cut square in cm; then the folded box has height \(x\), length \(20 - 2x\) (two flaps left the length), and width \(16 - 2x\). Volume is the product:</p>
+    <p style="text-align: center;">\(V(x) = x(20 - 2x)(16 - 2x)\)</p>
+    <p>Expanding (do it once, to know the family): \((20-2x)(16-2x) = 4x^2 - 72x + 320\), so</p>
+    <p style="text-align: center;">\(V(x) = 4x^3 - 72x^2 + 320x\)</p>
+    <p>A cubic &mdash; <em>of course</em> a cubic: three lengths multiplied. The model's form came from the structure of the situation, not from choosing a curve that looked nice. That is the signature of an honest model.</p>
+    <p><em>Domain of honesty:</em> the algebra accepts any \(x\), but the scissors do not. We need \(x &gt; 0\) (there must be a cut) and \(16 - 2x &gt; 0\) (the short side must survive), so:</p>
+    <p style="text-align: center;">\(0 &lt; x &lt; 8\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(V(x) = x(20-2x)(16-2x) = 4x^3 - 72x^2 + 320x\), honest on \(0 &lt; x &lt; 8\). Note what the factored form displays: the model's zeros are \(x = 0, 8, 10\) &mdash; the cuts that destroy the box entirely. Two of them are the fenceposts of the honest domain; the third (\(x = 10\)) is already fiction, since a 10 cm cut cannot even be made.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Find the volume of the box when \(x = 2\), and use the model to grade the &ldquo;always cut a quarter of the short side&rdquo; rule of thumb (\(x = 4\)).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(V(2) = 2(20-4)(16-4) = 2 \cdot 16 \cdot 12 = 384 \text{ cm}^3\)</p>
+    <p style="text-align: center;">\(V(4) = 4(20-8)(16-8) = 4 \cdot 12 \cdot 8 = 384 \text{ cm}^3\)</p>
+    <p>The same volume &mdash; a genuine surprise, and a lesson: two very different box shapes (a low tray and a tall block) can enclose identical space, which means neither is obviously the maximum. The peak lies somewhere between them.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(V(2) = V(4) = 384\) cm&sup3;. Where between 2 and 4 is the true best cut? The calculator moment below settles it &mdash; and grades your opening guess.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: Hunting the Maximum</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below):</p>
+        <ol>
+            <li>Graph <strong>V(x) = x(20 - 2x)(16 - 2x)</strong>, and add the domain fence by typing it as <strong>V(x) = x(20-2x)(16-2x) {0 &lt; x &lt; 8}</strong> &mdash; Desmos will draw only the honest part.</li>
+            <li>Click the hump's peak. Desmos reports the maximum near \((2.94, 420.1)\): the best cut is about <strong>2.94 cm</strong>, for about <strong>420 cm&sup3;</strong> &mdash; nearly 10% more than the 384 of \(x = 2\) or \(x = 4\). How close was your opening guess?</li>
+            <li>Now solve \(V(x) = 350\) graphically: add the line <strong>y = 350</strong> and click the intersections. Two honest solutions appear, near \(x \approx 1.66\) and \(x \approx 4.63\) &mdash; two different boxes holding 350 cm&sup3;. (The algebra of a cubic equation promises a third solution; it lies beyond \(x = 8\), outside the domain of honesty &mdash; a &ldquo;solution&rdquo; to the equation that is not a solution to the <em>problem</em>. Keeping those apart is the modeler's first duty.)</li>
+        </ol>
+        <p style="margin-bottom: 0;">In the calculus you will learn to find that peak exactly, by hand &mdash; it is one of that subject's founding problems, and Kepler's barrels stood at its cradle. For now, the graph finds it and <em>you</em> certify that it makes sense.</p>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Trusting a model outside its domain of honesty. Ask our volume model about a 9 cm cut &mdash; a cut that is physically impossible, since the 16 cm side only offers 8 &mdash; and it answers smoothly: \(V(9) = 4(729) - 72(81) + 320(9) = -36\) cm&sup3;. <strong>Negative volume.</strong> The function did not break; it was never a box outside \((0, 8)\). Every model you build this year gets its domain written next to it, at birth &mdash; an honest model knows where it stops being about anything.</div>
+    </div>
+
+    <p>Now the second half of the lesson: what if nobody gives you the dimensions &mdash; only <em>data</em>? Suppose you actually built five of these boxes, measured their volumes with rice and a measuring cup, and got slightly imperfect numbers (all real measurement is imperfect):</p>
+    <p style="text-align: center;">\((1, 250), \quad (2, 390), \quad (3, 415), \quad (4, 380), \quad (5, 305)\)</p>
+    <p>Software can find the polynomial of any chosen degree that comes closest to these points &mdash; Excel calls it a <strong>trendline</strong>, and it reports a statistic \(R^2\) between 0 and 1 measuring how much of the data's variation the curve captures. The mathematics of <em>how</em> (least squares) waits for a later course; the judgment of <em>what to fit</em> is today's skill, and no software supplies it.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128202; Try It in Excel: Fitting a Cubic Trendline</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">15 min</span></h4>
+        <p>Open a blank Excel workbook (school Microsoft account, as always):</p>
+        <ol>
+            <li>Enter the five data points: cut sizes in A2:A6, measured volumes in B2:B6, with headers <strong>Cut (cm)</strong> and <strong>Volume (cm&sup3;)</strong> in row 1.</li>
+            <li>Select the data and Insert &rarr; <strong>Scatter chart</strong> (points only, no lines &mdash; the data are the facts; the curve is a claim).</li>
+            <li>Click the chart, then the <strong>+</strong> &rarr; Trendline &rarr; More Options &rarr; <strong>Polynomial, Order 3</strong>. Check <strong>Display Equation on chart</strong> and <strong>Display R-squared value on chart</strong>.</li>
+            <li>Read the fitted cubic. Its coefficients should land reasonably near the true model's \(4, -72, 320, 0\) &mdash; the fit has recovered the physics from five noisy measurements, which is the genuinely wonderful thing about regression.</li>
+            <li>Now, for the cautionary tale: change the trendline order to <strong>4</strong>. \(R^2\) climbs. The curve hugs the points more tightly. Is the model <em>better</em>? Hold that question for the box below.</li>
+        </ol>
+        <p style="margin-bottom: 0;">Why order 3? Not because it scored well &mdash; because <strong>boxes have three dimensions</strong>. The degree was decided by the structure of the situation before the data ever arrived. When the form comes from the physics and the coefficients come from the data, each is doing its honest job.</p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE PERFECT FIT THAT LIES</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student showed an AI the five box measurements and asked what polynomial to fit. It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;With five data points, I recommend a degree-4 polynomial trendline. A degree-4 polynomial has five coefficients, so it will pass through all five points exactly, giving you R&sup2; = 1 &mdash; a perfect fit that captures 100% of the variation in your data.&rdquo;</p>
+            <p>Every sentence is factually true. The advice is still bad, and you now know enough to say why. A degree-4 curve through all five points must treat the measurement noise as <em>shape</em> &mdash; it will wiggle to honor every wobble of the rice-and-measuring-cup process. Its \(R^2 = 1\) certifies only that the curve memorized the data, not that it learned the box. Ask it to <em>predict</em> &mdash; the volume at \(x = 2.5\), or the best cut &mdash; and its answers chase noise; the honest cubic, scoring a humbler \(R^2\), predicts better, because its <em>form</em> was earned from the geometry. And ask the deeper question the AI never raised: <em>what should the degree be?</em> It reasoned from the number of data points; a modeler reasons from the number of dimensions.</p>
+            <p style="margin-bottom: 0;"><strong>The standing lesson:</strong> a fit statistic measures agreement with the data you have; honesty is about the situation the data came from. When an AI recommends a model, ask it &mdash; and yourself &mdash; <em>where does the form come from?</em> &ldquo;It fits better&rdquo; is not an answer. You will run this exact judgment on the unit's applied task, <em>The Honest Box</em>, with your own measured data.</p>
+        </div>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>A different modeling shape: a shipping crate must have a square base and a height 3 feet greater than its base side. Build the volume model, state its domain, and find the base side for which the volume is exactly 200 cubic feet.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><em>Define variables in words:</em> let \(s\) be the base side in feet; the height is \(s + 3\); the volume is</p>
+    <p style="text-align: center;">\(V(s) = s^2(s + 3) = s^3 + 3s^2, \qquad s &gt; 0\)</p>
+    <p>Set the volume to 200 and gather everything on one side:</p>
+    <p style="text-align: center;">\(s^3 + 3s^2 - 200 = 0\)</p>
+    <p>A cubic equation &mdash; and last week built exactly the tool for it. Rational-zero candidates include \(5\) (a divisor of 200): test \(5^3 + 3(25) - 200 = 125 + 75 - 200 = 0\) &#10003;. Divide out \((s - 5)\) synthetically (coefficients \(1, 3, 0, -200\), \(k = 5\)):</p>
+    <p style="text-align: center;">\(\begin{array}{c|rrrr} 5 & 1 & 3 & 0 & -200 \\ & & 5 & 40 & 200 \\ \hline & 1 & 8 & 40 & \fbox{0} \end{array}\)</p>
+    <p style="text-align: center;">\(s^3 + 3s^2 - 200 = (s - 5)(s^2 + 8s + 40)\)</p>
+    <p>The quadratic's discriminant is \(64 - 160 &lt; 0\): its two zeros are a complex conjugate pair &mdash; algebraically impeccable, and useless to a carpenter. The FTA's three promised solutions sort themselves into one honest answer and two that fail the domain.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The base is <strong>5 ft</strong> &mdash; a \(5 \times 5 \times 8\) crate. Verify in the original situation, never just the equation: \(5^2 \cdot 8 = 200\) cubic feet &#10003;. Note where each rejection happened <em>in writing</em>: the complex pair was dismissed with its discriminant shown, not silently dropped. A modeler's solution accounts for every root the algebra produces.</p>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A box is built from a 12 cm &times; 12 cm sheet by the same corner-cut fold. Build \(V(x)\) in factored and expanded form, state the domain of honesty, and compute \(V(2)\). Work it on paper before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(V(x) = x(12-2x)^2 = 4x^3 - 48x^2 + 144x\), honest on \(0 &lt; x &lt; 6\). \(V(2) = 2(8)^2 = 128\) cm&sup3;. (Square sheet, so the factor \((12-2x)\) appears squared &mdash; a multiplicity-2 zero at \(x = 6\): the model <em>touches</em> zero volume there rather than crossing into fiction. The graph knows the geometry.)
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Your Excel fit of noisy data returns \(R^2 = 0.97\) for a cubic and \(R^2 = 0.999\) for a degree-7 polynomial. Which do you report, and what two questions decide it?</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Report the cubic. The deciding questions: <em>Where does each form come from?</em> (The cubic from the three-dimensional structure; the degree-7 from nothing but the scoreboard.) <em>How does each behave between and beyond the data?</em> (The cubic stays box-shaped; the degree-7 wiggles through noise and exits the data range steeply toward nonsense.) \(R^2\) rewards memorization; honesty requires structure.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Kepler's barrel book contained a result he found merely charming but posterity found prophetic: near a volume's maximum, changing the shape a little changes the volume almost not at all &mdash; you saw it yourself, with \(V(2) = V(4)\) flanking the gentle summit at 2.94. Fifty years later, that observation &mdash; <em>at a peak, the rate of change is zero</em> &mdash; became the cornerstone of the differential calculus. A wedding purchase, honestly questioned, opened one of mathematics' great doors.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Modeling is the unit's virtue made practical. An honest polynomial model earns its <em>form</em> from the situation's structure (three lengths, so a cubic), earns its <em>coefficients</em> from the given facts or the data, and carries its <em>domain of honesty</em> on its sleeve &mdash; refusing to answer questions about boxes that cannot exist. Fitting software and AI advisers can supply curves and scores in seconds; only the modeler can supply the judgment about where form should come from, and you practiced exactly that judgment against a confident, statistically flawless, wrong recommendation. Tomorrow the unit crosses its watershed: functions built not by multiplying factors but by <em>dividing</em> them &mdash; rational functions &mdash; where the places a function fails to exist become the most informative places on its graph.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What distinguishes a model whose form comes from structure from one whose form comes from fit &mdash; and why does the difference show up most in <em>predictions</em>?</p>
+    <p>2. Why is a model's domain of honesty usually narrower than its function's algebraic domain, and whose job is it to say so?</p>
+    <p>3. What does \(R^2 = 1\) actually certify, and how can a perfect score mark a worse model?</p>
+    <p>4. A cubic equation from a real situation has three algebraic solutions and one honest one. What disqualifies the other two, and where in your written solution should each be dismissed?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">2-6 &middot; Modeling and Fitting Polynomial Functions</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>

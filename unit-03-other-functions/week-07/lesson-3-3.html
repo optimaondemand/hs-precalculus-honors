@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 3-3</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q1 &middot; Unit 3</div>
+        <div style="font-size: 13px; color: #666;">Other Functions and Their Graphs</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">3-3</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Other Functions and Their Graphs</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">3-3</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">The Number e and Continuous Growth</div>
+    <div style="font-size: 15px; color: #666;">Lesson &middot; This week's Focus assignment draws on this material</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to explain where the number \(e\) comes from, as the ceiling of the compounding expression \(\left(1 + \frac{1}{n}\right)^n\).</p></li>
+        <li><p>I will be able to compare compounding frequencies with the compound interest formula and describe how the gains shrink.</p></li>
+        <li><p>I will be able to model continuous growth with \(A = Pe^{rt}\).</p></li>
+        <li><p>I will be able to evaluate natural exponential expressions with Excel and Desmos, and estimate a &ldquo;when&rdquo; question graphically.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>e</strong>: The number \(2.718281828\ldots\) &mdash; irrational, unending, unrepeating &mdash; that \(\left(1 + \frac{1}{n}\right)^n\) approaches as \(n\) grows without bound. The base of the natural exponential function.</p>
+    <p><strong>Compound interest</strong>: Interest computed on the balance <em>including previously earned interest</em> &mdash; interest earning interest. Formula: \(A = P\left(1 + \frac{r}{n}\right)^{nt}\), with principal \(P\), annual rate \(r\), and \(n\) compoundings per year for \(t\) years.</p>
+    <p><strong>Continuous compounding</strong>: The limiting case &mdash; compounding at every instant, \(n\) pushed past all bounds &mdash; giving \(A = Pe^{rt}\).</p>
+    <p><strong>Natural exponential function</strong>: \(f(x) = e^x\), the exponential whose base is \(e\); the standard model for growth that happens continuously rather than in steps.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>In 1683 the Swiss mathematician Jacob Bernoulli asked a banker's question and found a philosopher's answer. Suppose a preposterously generous bank pays <strong>100% interest per year</strong>, and you deposit $1. Compounded once, at year's end you have $2. But what if the bank compounds twice &mdash; 50% at midyear, then 50% on the <em>new</em> balance? You get \(1.5 \times 1.5 = \$2.25\). Compound quarterly and it is \((1.25)^4 \approx \$2.44\). More compounding, more money &mdash; always. So Bernoulli pressed the question to its edge: compound monthly, daily, hourly, <em>every instant</em> &mdash; does the dollar grow without limit?</p>
+    <p>It does not. The answer creeps upward toward a ceiling it never passes, a number that turned out to be one of the most important constants in all of mathematics. Half a century later Leonhard Euler named it \(e\) and computed its digits: \(e \approx 2.718281828\ldots\), irrational, its decimal expansion never repeating. Here is the unit's virtue of wonder in its purest form: <strong>nobody chose this number.</strong> It was not designed, like a coinage system, or measured, like a planet's mass. It was found hiding inside the act of compounding itself &mdash; and it has been turning up ever since, in population biology, radioactive decay, probability, and the geometry of curves, wherever growth happens continuously.</p>
+    <p>Watch the cornering happen. One dollar, 100% annual interest, compounded \(n\) times, yields \(\left(1 + \frac{1}{n}\right)^n\) dollars &mdash; each of the \(n\) periods multiplies the balance by \(1 + \frac{1}{n}\). Now let \(n\) climb:</p>
+
+    <div style="overflow-x: auto;">
+    <table style="border-collapse: collapse; margin: 10px auto; min-width: 420px;">
+        <thead>
+            <tr style="background: #0E1C42;">
+                <th style="padding: 8px 14px; font-size: 14px; color: #fff; text-align: left; border: 1px solid #334;">Compounding</th>
+                <th style="padding: 8px 14px; font-size: 14px; color: #fff; text-align: center; border: 1px solid #334;">\(n\)</th>
+                <th style="padding: 8px 14px; font-size: 14px; color: #fff; text-align: center; border: 1px solid #334;">\(\left(1 + \frac{1}{n}\right)^n\)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr style="background: #FFFFFF;"><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8;">Annually</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">1</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">2</td></tr>
+            <tr style="background: #F4F6FA;"><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8;">Semiannually</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">2</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">2.25</td></tr>
+            <tr style="background: #FFFFFF;"><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8;">Quarterly</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">4</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">2.44140625</td></tr>
+            <tr style="background: #F4F6FA;"><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8;">Monthly</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">12</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">2.613035</td></tr>
+            <tr style="background: #FFFFFF;"><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8;">Weekly</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">52</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">2.692597</td></tr>
+            <tr style="background: #F4F6FA;"><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8;">Daily</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">365</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">2.714567</td></tr>
+            <tr style="background: #FFFFFF;"><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8;">Hourly</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">8,760</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">2.718127</td></tr>
+            <tr style="background: #EEF1F8;"><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8;"><em>The ceiling</em></td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;">\(n \to \infty\)</td><td style="padding: 7px 14px; font-size: 15px; border: 1px solid #D0D9E8; text-align: center;"><strong>\(e \approx 2.718282\)</strong></td></tr>
+        </tbody>
+    </table>
+    </div>
+
+    <p>From daily to hourly &mdash; 24 times more compounding &mdash; buys about a third of a cent. The expression is not marching to infinity; it is stalling, and the wall it stalls against is \(e\). Why? Each refinement adds interest-on-interest for ever-shorter stretches &mdash; but the interest those stretches could earn is itself already nearly captured by the previous refinement. The leftovers shrink faster than the refinements multiply.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Compound and Continuous Growth</strong></h4>
+        <ul>
+            <li><strong>Compounded \(n\) times per year:</strong> \(A = P\left(1 + \dfrac{r}{n}\right)^{nt}\) &mdash; each of the \(nt\) periods multiplies the balance by \(1 + \frac{r}{n}\).</li>
+            <li><strong>Compounded continuously:</strong> \(A = Pe^{rt}\) &mdash; the ceiling of the formula above as \(n \to \infty\), because \(\left(1 + \frac{r}{n}\right)^{n}\) closes in on \(e^{r}\) just as \(\left(1 + \frac{1}{n}\right)^n\) closes in on \(e\).</li>
+            <li><strong>\(r\) enters as a decimal:</strong> 5% is \(r = 0.05\) &mdash; always.</li>
+        </ul>
+        <p style="margin-bottom: 0;">One formula for growth in steps, one for growth as flow &mdash; and \(e\) is the bridge between them.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128202; In Excel: Corner e Yourself</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">15 min</span></h4>
+        <p>Do not take the table above on faith &mdash; rebuild it. Open a blank Excel workbook:</p>
+        <ol>
+            <li>In column A, starting at A2, enter the compounding counts: <strong>1, 2, 4, 12, 52, 365, 8760, 525600</strong> (that last one is every minute of the year).</li>
+            <li>In B2 type <strong>=(1+1/A2)^A2</strong> and fill down. Format column B to six decimal places.</li>
+            <li>Read down the column and watch the stall: the jump from row to row collapses &mdash; whole cents, then tenths, then \(2.718127 \to 2.718279\) as you go from every hour to every minute. A 60-fold refinement moves the fourth decimal place.</li>
+            <li>In D2 type <strong>=EXP(1)</strong> &mdash; Excel's built-in \(e\) &mdash; and compare. Your minute-by-minute value agrees with \(e = 2.718282\ldots\) to five decimal places. The ceiling is real, and you have just measured it.</li>
+            <li>Keep the workbook: swap the formula to <strong>=(1+0.05/A2)^A2</strong> and watch the same stall against \(e^{0.05}\). The construction generalizes &mdash; that is the assignment's honors stretch, half-built.</li>
+        </ol>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>You invest \(\$1000\) at 5% annual interest for 10 years. Climb the compounding ladder: find the balance with annual, quarterly, monthly, daily, and continuous compounding.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Each rung uses \(A = 1000\left(1 + \frac{0.05}{n}\right)^{10n}\), and the top rung uses \(A = 1000e^{0.05 \cdot 10} = 1000e^{0.5}\):</p>
+    <p style="text-align: center;">Annual: \(1000(1.05)^{10} \approx \$1628.89\)</p>
+    <p style="text-align: center;">Quarterly: \(1000(1.0125)^{40} \approx \$1643.62\)</p>
+    <p style="text-align: center;">Monthly: \(1000\left(1 + \tfrac{0.05}{12}\right)^{120} \approx \$1647.01\)</p>
+    <p style="text-align: center;">Daily: \(1000\left(1 + \tfrac{0.05}{365}\right)^{3650} \approx \$1648.66\)</p>
+    <p style="text-align: center;">Continuous: \(1000e^{0.5} \approx \$1648.72\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The ladder climbs $1628.89, $1643.62, $1647.01, $1648.66, $1648.72 &mdash; and look at the <em>gains</em>: +$14.73, +$3.39, +$1.65, +$0.06. Moving from monthly to <em>infinitely many</em> compoundings &mdash; the entire rest of the ladder &mdash; buys $1.71, less than two dollars. Bernoulli's discovery, priced in your own account: compounding more helps, but toward a ceiling, never toward the sky.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A town of 38,000 grows continuously at 2.4% per year. Write the model and find the population after 6 years.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Continuous growth is \(A(t) = Pe^{rt}\) with \(P = 38000\) and \(r = 0.024\), so \(A(t) = 38000e^{0.024t}\). At \(t = 6\):</p>
+    <p style="text-align: center;">\(A(6) = 38000e^{0.024 \cdot 6} = 38000e^{0.144} \approx 38000(1.154884) \approx 43{,}886\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> About <strong>43,900 people</strong>. Populations suit the continuous model for a good reason: a town does not grow in an annual burst on December 31 &mdash; births and arrivals flow through every day of the year. Where growth is a flow, \(e\) is the natural base.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>You want an account to hold \(\$5000\) eight years from now. It earns 3% compounded continuously. How much must you deposit today?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Here the unknown is the principal. Set up \(5000 = Pe^{0.03 \cdot 8} = Pe^{0.24}\) and divide both sides by \(e^{0.24}\):</p>
+    <p style="text-align: center;">\(P = \dfrac{5000}{e^{0.24}} = 5000e^{-0.24} \approx 5000(0.786628) \approx \$3933.14\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Deposit about <strong>$3,933.14</strong>. Check forward: \(3933.14 \, e^{0.24} \approx 5000\) &#10003;. Note the move: dividing by \(e^{0.24}\) is multiplying by \(e^{-0.24}\) &mdash; a negative exponent runs the growth film backward, and solving for \(P\) needed only that.</p>
+    <p>But now try the question everyone actually asks: <em>how long</em> until a deposit doubles? For \(\$1000\) at 5% continuous, that demands solving \(1000e^{0.05t} = 2000\) &mdash; and the unknown \(t\) is locked in the exponent, exactly where Lesson 3-2's intercepts hid. Estimate it honestly in Desmos: graph \(y = 1000e^{0.05x}\) and \(y = 2000\), click the intersection, and read \(t \approx 13.9\) years. That is a measurement, not a solution. The tool that <em>solves</em> it &mdash; that undoes an exponential exactly &mdash; arrives next week, and it was the greatest labor-saving invention in the history of calculation.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; WHERE AI HELPS &mdash; AND WHERE IT DOESN'T</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Ask your AI tutor the question Bernoulli asked: &ldquo;Why doesn't \(\left(1 + \frac{1}{n}\right)^n\) grow to infinity as \(n\) grows? Explain without calculus.&rdquo; Then hold its answer up against your own Excel table. A good explanation must account for the <em>stall you measured</em> &mdash; each refinement adds interest-on-interest over shorter stretches, but that interest was already nearly captured by the refinement before, so the additions shrink faster than they multiply. A weak or hallucinated answer waves at &ldquo;limits&rdquo; without explaining why the additions shrink, or worse, asserts the expression grows forever (your spreadsheet refutes that in eight rows). You hold the evidence; the AI holds only words. Make the words answer to the evidence &mdash; that is the supervising habit this course is building.</div>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Two errors, one small and one philosophical. First: plugging the percent in whole &mdash; \(r = 5\) instead of \(r = 0.05\). Then \(1000e^{5 \cdot 10} = 1000e^{50}\) is about \(5 \times 10^{24}\) dollars &mdash; more than all the money on Earth, from a savings account. If your answer could buy the planet, recheck \(r\). Second: believing continuous compounding makes money grow <em>without bound in finite time</em>. It never does &mdash; continuous compounding is the <em>ceiling</em> of the ladder, not an escape from it. \(Pe^{rt}\) is a perfectly finite number for every finite \(t\); in Example 1 it beat daily compounding by six cents.</div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Compute \(\left(1 + \frac{1}{100}\right)^{100}\) to six decimal places. How far below \(e\) does it still sit? Work it (with a calculator) before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \((1.01)^{100} \approx 2.704814\). Against \(e \approx 2.718282\), that is still about \(0.0135\) short &mdash; a hundred compoundings and the third decimal place is still wrong. The climb toward \(e\) is real but unhurried; that slowness is exactly why the stall in your Excel table is so convincing.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: \(\$2500\) is invested at 3.6% compounded continuously. Write the model and find the balance after 5 years.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(A(t) = 2500e^{0.036t}\); then \(A(5) = 2500e^{0.18} \approx 2500(1.197217) \approx \$2993.04\). (If you got an astronomical number, you used \(r = 3.6\) &mdash; the decimal matters.)
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The digits of \(e\) begin \(2.7\,1828\,1828\,45\,90\,45\ldots\) &mdash; and generations of students have gratefully memorized the &ldquo;1828, 1828&rdquo; repetition. But \(e\) is irrational (Euler proved it in 1737), so its decimal expansion can never truly repeat: the pattern is pure coincidence, and it breaks immediately after. Even the number's name is quietly humble &mdash; Euler simply used the letter \(e\) in his notes, and it stuck. A constant discovered rather than designed, wearing a pattern that dissolves the moment you trust it: \(e\) rewards wonder and punishes assumption, which makes it very good company for a mathematician.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Today you watched a number get cornered: Bernoulli's compounding question, pressed refinement by refinement, stalled against a ceiling that no amount of compounding can breach, and that ceiling &mdash; \(e \approx 2.718282\), irrational, unchosen, everywhere &mdash; became a new base for a new function, \(e^x\), with its own formula \(A = Pe^{rt}\) for growth that flows instead of steps. You climbed the ladder in dollars and found the rungs shrinking; you rebuilt the stall in Excel with your own formula; and you ran into the locked door again &mdash; <em>how long until&hellip;?</em> &mdash; which graphs can estimate but not yet solve. Tomorrow assembles the full modeling toolkit around what you now own: doubling times, half-lives, radiocarbon clocks, and interest in all its frequencies &mdash; every exponential story the world actually tells, run forward. And remember: <strong>this week's Focus assignment is today's</strong> &mdash; the compounding ladder and the continuous model are the two method problems your teacher reads closely. Build them like arguments.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does more frequent compounding always help, yet never help past a ceiling &mdash; what shrinks faster than the refinements multiply?</p>
+    <p>2. In what sense was \(e\) discovered rather than invented, and why does that distinction feed wonder?</p>
+    <p>3. When does a continuous model \(Pe^{rt}\) suit a situation better than a stepped model \(P\left(1 + \frac{r}{n}\right)^{nt}\)?</p>
+    <p>4. What can a graphical estimate of &ldquo;how long until&hellip;?&rdquo; deliver, and what must it leave for an exact tool?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 1 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">3-3 &middot; The Number e and Continuous Growth</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+</div>
+</body>
+</html>
