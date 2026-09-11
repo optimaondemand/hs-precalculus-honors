@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 8-10</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 8</div>
+        <div style="font-size: 13px; color: #666;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">8-10</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">8-10</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Modeling Motion in the Plane</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to build a parametric model for a rendezvous (pursuit) scenario and determine whether, and when, two moving objects meet.</p></li>
+        <li><p>I will be able to apply the parametric equations of a cycloid to a rolling-wheel scenario and interpret the resulting height and span.</p></li>
+        <li><p>I will be able to build a parametric model for elliptical orbital motion, convert it to rectangular form, and identify the orbit's closest and farthest points from the center.</p></li>
+        <li><p>I will be able to use an AI tutor to generate additional motion-modeling scenarios, and independently verify its parametric equations by checking specific \(t\)-values by hand.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Rendezvous (pursuit) problem</strong>: a problem asking whether, and when, two independently moving objects occupy the same point at the same time &mdash; requiring \(x_1(t)=x_2(t)\) <em>and</em> \(y_1(t)=y_2(t)\) for one shared value of \(t\), not merely a shared point traced at different times.</p>
+    <p><strong>Cycloid</strong>: the curve traced by a fixed point on the rim of a circle of radius \(r\) as the circle rolls, without slipping, along a straight line &mdash; parametrized by \(x(t)=r(t-\sin t)\), \(y(t)=r(1-\cos t)\).</p>
+    <p><strong>Orbital motion (parametrized)</strong>: position modeled as \(x(t)=a\cos t\), \(y(t)=b\sin t\), tracing an ellipse of semi-axes \(a\) and \(b\) centered at the origin as \(t\) sweeps through one period.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>The cycloid &mdash; the curve traced by a nail on a rolling cart wheel &mdash; caused so much argument among the sharpest mathematicians of the 1600s that it earned an unofficial nickname: <em>the Helen of Geometers</em>, a curve so beautiful that it started fights. Pascal, Torricelli, Wren, and the Bernoulli brothers all took turns proving results about its arc length and the area beneath it, sometimes racing each other to publish first. Yesterday's lesson gave you the cycloid's parametric equations as one entry in a gallery of curves technology could trace. Today it, an orbit, and a rendezvous between two independently moving objects all get the same treatment: not curves to admire, but motions to model, solve, and interpret &mdash; the same one-clock, shared-parameter habit Lesson 8-9 built for a single thrown object, now applied to richer situations.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Same Clock, Different Paths</strong></h4>
+        <p>A rendezvous problem gives each object its own pair of parametric equations, both written in the <em>same</em> variable \(t\). Finding where the two objects' paths cross as bare curves &mdash; eliminating \(t\) from each and intersecting the resulting equations &mdash; only tells you where the two <em>tracks</em> overlap in space, the way two roads might cross at an intersection. It says nothing about whether the two objects are ever standing at that intersection at the same moment. A genuine meeting requires solving \(x_1(t)=x_2(t)\) and \(y_1(t)=y_2(t)\) <em>simultaneously</em>, for one common \(t\) &mdash; the parametric form's whole advantage is that it can ask this sharper, more honest question in the first place.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1 &mdash; A Rendezvous</span></h4>
+    <p>Two search-and-rescue boats' positions (in nautical miles from a fixed buoy, \(t\) in hours after they launch) are modeled by Boat A: \(x=5+3t,\ y=2+4t\), and Boat B: \(x=17-3t,\ y=16-3t\). Do the boats meet? If so, when and where?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Set both coordinates equal at once. From \(x\): \(5+3t=17-3t \Rightarrow 6t=12 \Rightarrow t=2\). From \(y\): \(2+4t=16-3t \Rightarrow 7t=14 \Rightarrow t=2\). Both equations agree on the <em>same</em> \(t\) &mdash; that agreement is the whole test.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The boats meet at \(t=2\) hours, at position \((11,10)\) &mdash; check: Boat A gives \((5+6,\,2+8)=(11,10)\); Boat B gives \((17-6,\,16-6)=(11,10)\). Both agree, confirming a genuine rendezvous, not merely crossing tracks.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Cycloid, Applied</strong></h4>
+        <p>Lesson 8-8 introduced the cycloid \(x(t)=r(t-\sin t)\), \(y(t)=r(1-\cos t)\) as the path of a point fixed to the rim of a circle of radius \(r\), rolling without slipping. Two facts follow directly from the formula and are worth carrying forward: the traced point reaches a maximum height of exactly \(2r\) (twice the wheel's diameter's radius, at the top of each arch, when \(t=\pi,3\pi,\ldots\)), and it returns to the ground &mdash; completing one full arch &mdash; every time \(t\) advances by \(2\pi\), covering a horizontal span of exactly \(2\pi r\), the wheel's own circumference. The point also comes to instantaneous rest each time it touches the ground, since the rim point at the bottom of a wheel rolling without slipping is not sliding relative to the surface at that instant.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2 &mdash; A Rolling Wheel</span></h4>
+    <p>A paint mark on the rim of a bicycle wheel of radius \(2\) ft traces a cycloid as the bicycle rolls forward. Find the mark's height above the ground after it has swept through \(t=\pi\) and \(t=2\pi\), and describe what each moment represents.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>With \(r=2\): \(x(t)=2(t-\sin t)\), \(y(t)=2(1-\cos t)\). At \(t=\pi\): \(x=2(\pi-0)=2\pi\approx6.28\) ft, \(y=2(1-(-1))=4\) ft. At \(t=2\pi\): \(x=2(2\pi-0)=4\pi\approx12.57\) ft, \(y=2(1-1)=0\) ft.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> At \(t=\pi\), the mark is at the very top of its arch, \(4\) ft up (matching \(2r=4\) exactly) &mdash; the mark is momentarily moving at twice the bicycle's forward speed, straight ahead. At \(t=2\pi\), the mark has returned to the ground after one full revolution, having advanced \(4\pi\approx12.57\) ft &mdash; exactly the wheel's circumference \(2\pi r\), the mark momentarily at rest.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: Orbital Motion, Parametrized</strong></h4>
+        <p>A body moving on an ellipse centered at the origin, with semi-axes \(a\) (horizontal) and \(b\) (vertical), can be parametrized \(x(t)=a\cos t\), \(y(t)=b\sin t\). Eliminating \(t\) with \(\cos^2t+\sin^2t=1\) recovers the familiar rectangular ellipse \(\left(\frac{x}{a}\right)^2+\left(\frac{y}{b}\right)^2=1\). <strong>One honest caution:</strong> this centered parametrization is a convenient <em>model</em> for practicing the algebra of translating between representations &mdash; it is not a true gravitational orbit, where the orbited body sits at one <em>focus</em> of the ellipse rather than at its center. Real orbital mechanics (Kepler's laws) is a richer problem for another course; today's version borrows the ellipse's shape without borrowing the full physics.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 3 &mdash; An Orbital Model</span></h4>
+    <p>A satellite's position (in thousands of kilometers from a central point) is modeled by \(x(t)=8\cos t\), \(y(t)=5\sin t\). Find the rectangular equation of its path, and verify a specific point.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(\left(\dfrac{x}{8}\right)^2+\left(\dfrac{y}{5}\right)^2=\cos^2t+\sin^2t=1\). At \(t=\frac{\pi}{4}\): \(x=8\cdot\frac{\sqrt2}{2}=4\sqrt2\approx5.66\), \(y=5\cdot\frac{\sqrt2}{2}=\frac{5\sqrt2}{2}\approx3.54\). Check: \(\left(\frac{5.66}{8}\right)^2+\left(\frac{3.54}{5}\right)^2\approx0.5+0.5=1\). &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{x^2}{64}+\dfrac{y^2}{25}=1\). Since \(a=8>b=5\), the modeled body is closest to the center (distance \(5\)) at \(t=\frac{\pi}{2}\) and \(\frac{3\pi}{2}\), and farthest (distance \(8\)) at \(t=0\) and \(\pi\).</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; WHERE AI HELPS &mdash; AND WHERE IT DOESN'T</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Ask your AI tutor: &ldquo;Give me two more scenarios like today's lesson &mdash; one a pursuit or rendezvous problem, one an orbital-motion problem &mdash; with their parametric equations.&rdquo; This is work AI does readily: it can generate plausible-sounding position functions all day. But a plausible-looking pair of parametric equations is not the same as a correct one. Before you trust anything it hands you, <strong>audit it</strong>: pick two or three specific \(t\)-values, compute both objects' positions by hand exactly as in Example 1, and confirm the AI's claimed meeting point (or orbital shape) actually holds up under those numbers. If the AI claims two objects meet, verify both coordinates agree at the same \(t\) &mdash; not just that the paths look like they cross on a sketch. The AI supplies scenarios quickly; you supply the check that makes them trustworthy.</div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Ship C is at \(x=4t,\ y=3t\); Ship D is at \(x=20-2t,\ y=5+4t\). Do they meet?</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            From \(x\): \(4t=20-2t \Rightarrow 6t=20 \Rightarrow t=\frac{10}{3}\approx3.33\). From \(y\): \(3t=5+4t \Rightarrow -t=5 \Rightarrow t=-5\). The two equations demand different, inconsistent values of \(t\) &mdash; there is no single moment at which both coordinates agree, so the ships do not meet, regardless of whether their plotted tracks happen to cross somewhere on a map.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; CHECK YOURSELF WITH DESMOS</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a>, graph Example 1's two boats in parametric mode as <strong>(5+3t, 2+4t)</strong> and <strong>(17-3t, 16-3t)</strong> over \(t\in[0,3]\), and watch both traced points arrive at \((11,10)\) at the same slider value \(t=2\). Then graph Example 3's orbit as <strong>(8cos(t), 5sin(t))</strong> and trace to confirm the closest and farthest points from the origin match your hand computation.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>A rendezvous at sea, a mark on a rolling wheel, and a body sweeping out an orbit look like three unrelated stories. Written as parametric equations, they are one story: a position that answers to a shared clock. That is the whole discipline this lesson practiced &mdash; and the discipline this unit's wonder has been quietly building toward all along, from a single point on a circle to a full curriculum of motion. Tomorrow, the unit's last new content asks a different kind of question: given one curve or one motion, which of the three languages this unit has built &mdash; rectangular, polar, or parametric &mdash; tells its story best, and how do you move fluently among all three?</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why must a rendezvous problem require \(x_1(t)=x_2(t)\) and \(y_1(t)=y_2(t)\) at the <em>same</em> \(t\), rather than merely finding where the two paths cross as curves?</p>
+    <p>2. What does the cycloid's parametric formula reveal about a point on a rolling wheel that a single rectangular equation would not make as visible?</p>
+    <p>3. In the AI-tutor exercise, what specific \(t\)-values would you check to verify a claimed parametric model, and why does checking a few values disprove a wrong model faster than it can prove a correct one?</p>
+    <p>4. Why is the centered ellipse \(x=a\cos t,\ y=b\sin t\) an honest algebra exercise but not a fully honest picture of a real gravitational orbit?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">8-10 &middot; Modeling Motion in the Plane</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

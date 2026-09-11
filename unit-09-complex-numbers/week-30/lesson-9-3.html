@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 9-3</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 9</div>
+        <div style="font-size: 13px; color: #666;">Complex Numbers</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">9-3</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Complex Numbers</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">9-3</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Solving Problems with Complex Numbers</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to solve a quadratic equation with a negative discriminant, expressing the solutions in \(a+bi\) form.</p></li>
+        <li><p>I will be able to verify a complex solution by substituting it back into the original equation, rather than trusting the quadratic formula blindly.</p></li>
+        <li><p>I will be able to locate a pair of complex solutions as points in the complex plane and describe their symmetry.</p></li>
+        <li><p>I will be able to use an AI tool to generate additional complex-solution quadratics and independently verify its work, rather than accepting it on trust.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Discriminant</strong>: for \(ax^2+bx+c=0\), the quantity \(b^2-4ac\) under the radical in the quadratic formula; its sign determines the type of solutions the equation has.</p>
+    <p><strong>Complex solution (complex root)</strong>: a solution to an equation that is a complex number \(a+bi\) with \(b\ne0\) &mdash; one that does not correspond to any point on the real number line.</p>
+    <p><strong>Conjugate pair</strong>: two complex solutions of the form \(a+bi\) and \(a-bi\), which appear together whenever a polynomial equation with real-number coefficients has a non-real solution.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Recall the number that started this unit: \(5+\sqrt{-15}\), the quantity that gave Cardano his &ldquo;mental tortures&rdquo; back in Lesson 9-1. That expression came from solving an ordinary-looking algebra problem, and Cardano's discomfort came precisely from not yet having a number system in which \(\sqrt{-15}\) meant anything. You now have that number system. Today's lesson takes the single most common place a negative square root turns up in ordinary algebra &mdash; the quadratic formula, applied to an equation whose discriminant happens to be negative &mdash; and shows that the &ldquo;impossible&rdquo; solutions it produces are not errors, dead ends, or nonsense. They are complex numbers, exactly as legitimate as any other, and they can be checked, trusted, and put to work.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Discriminant Decides the Kind of Solution</strong></h4>
+        <p>For \(ax^2+bx+c=0\) with real-number coefficients, the quadratic formula gives</p>
+        <p style="text-align: center;">\(x = \dfrac{-b\pm\sqrt{b^2-4ac}}{2a}\)</p>
+        <p>The quantity \(b^2-4ac\), the <strong>discriminant</strong>, decides what kind of solutions appear: a positive discriminant gives two distinct real solutions, a discriminant of exactly \(0\) gives one repeated real solution, and a <strong>negative</strong> discriminant gives two complex solutions, written in \(a+bi\) form by factoring \(i=\sqrt{-1}\) out of the negative square root.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Solve \(x^2+9=0\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(x^2=-9 \quad\Rightarrow\quad x=\pm\sqrt{-9} = \pm\sqrt{9}\cdot\sqrt{-1} = \pm3i\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x=3i\) or \(x=-3i\). Check: \((3i)^2+9 = 9i^2+9 = -9+9 = 0\) &#10003;, and \((-3i)^2+9=9i^2+9=-9+9=0\) &#10003; &mdash; both solutions satisfy the original equation exactly.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Solve \(x^2+4x+13=0\) using the quadratic formula, and verify your answer by substitution.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(a=1,\ b=4,\ c=13 \qquad b^2-4ac = 16-52 = -36\)</p>
+    <p style="text-align: center;">\(x = \dfrac{-4\pm\sqrt{-36}}{2} = \dfrac{-4\pm6i}{2} = -2\pm3i\)</p>
+    <p>Verify \(x=-2+3i\) by substitution: \((-2+3i)^2+4(-2+3i)+13\).</p>
+    <p style="text-align: center;">\((-2+3i)^2 = 4-12i+9i^2 = 4-12i-9 = -5-12i\)</p>
+    <p style="text-align: center;">\(4(-2+3i) = -8+12i\)</p>
+    <p style="text-align: center;">\((-5-12i)+(-8+12i)+13 = (-5-8+13)+(-12i+12i) = 0+0i = 0\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x=-2+3i\) or \(x=-2-3i\), a conjugate pair. The substitution above confirms \(x=-2+3i\) genuinely satisfies the equation &mdash; not merely that the formula produced it, but that it checks out under the same algebra you would use to check any real solution.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>An engineer models the total opposition to current flow in a small AC circuit with the equation \(z^2-6z+34=0\), where \(z\) represents a quantity built from the circuit's resistance and reactance. Solve for \(z\), and verify your answer by substitution.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(a=1,\ b=-6,\ c=34 \qquad b^2-4ac = 36-136 = -100\)</p>
+    <p style="text-align: center;">\(z = \dfrac{6\pm\sqrt{-100}}{2} = \dfrac{6\pm10i}{2} = 3\pm5i\)</p>
+    <p>Verify \(z=3+5i\): \((3+5i)^2-6(3+5i)+34 = (9+30i-25)-(18+30i)+34 = (-16+30i)+(-18-30i)+34 = (-16-18+34)+(30i-30i) = 0\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(z=3+5i\) or \(z=3-5i\). Circuits like this one are exactly why electrical engineers work with complex numbers every day: a quantity called <strong>impedance</strong>, written \(R+Xi\) for resistance \(R\) and reactance \(X\), behaves algebraically like any other complex number, and equations describing it routinely have complex solutions that are fully meaningful within the model &mdash; not errors to be explained away.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: Complex Roots Come in Conjugate Pairs</strong></h4>
+        <p style="margin-bottom: 0;">Whenever a polynomial equation has real-number coefficients, its non-real solutions always come in conjugate pairs: if \(a+bi\) is a solution, so is \(a-bi\). You can see why directly from the quadratic formula &mdash; the \(\pm\) in front of \(\sqrt{b^2-4ac}\) produces the two solutions \(\frac{-b}{2a}+\frac{\sqrt{4ac-b^2}}{2a}i\) and \(\frac{-b}{2a}-\frac{\sqrt{4ac-b^2}}{2a}i\), which are conjugates of each other by construction. Geometrically, this means the two solutions always plot as reflections of each other across the real axis &mdash; exactly Lesson 9-1's conjugate-as-reflection rule, now showing up inside every complex-solution quadratic you will ever solve.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Plot the two solutions to Example 2, \(x=-2+3i\) and \(x=-2-3i\), and describe their geometric relationship.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(-2+3i\) plots at \((-2,3)\); \(-2-3i\) plots at \((-2,-3)\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The two points share the same real part and have opposite imaginary parts, so they are mirror images of each other across the real axis &mdash; precisely what it means for two numbers to be conjugates, and precisely what the Key Fact above guarantees for any real-coefficient quadratic with a negative discriminant.</p>
+
+    <div style="background: #F0EAFB; border-left: 5px solid #6C3FC5; border-top: 3px solid #8E5FE0; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #4B2E86; margin-bottom: 8px;">&#129302; AI-ENHANCED: SUPERVISE THE TOOL</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Ask your AI tutor to generate two more quadratic equations with complex solutions, similar in style to Example 2 or Example 3. Then, for each one, solve it yourself with the quadratic formula and <strong>verify the solution by substituting it back into the original equation</strong>, exactly as this lesson's worked examples did &mdash; do not simply trust that the AI's equation or its stated solutions are correct. If your substitution does not come out to zero, work back through both your algebra and the AI's to find where the mismatch happened. An AI tutor is useful for generating practice material quickly; it is your own substitution check, not the AI's say-so, that tells you whether an answer is actually right.</div>
+    </div>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Seeing Why the Discriminant Matters</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), graph \(y=x^2+4x+13\) from Example 2. Notice that the parabola never crosses the \(x\)-axis at all &mdash; it stays entirely above it, with its vertex sitting at \(y=9\). That is exactly what a negative discriminant means graphically: no real \(x\)-intercepts, because the equation's real-valued graph never touches zero. The solutions \(-2\pm3i\) are real and correct as complex numbers; they are simply not visible on a graph that only plots real inputs and real outputs.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve \(x^2+2x+5=0\), and verify one solution by substitution.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(b^2-4ac=4-20=-16\), so \(x=\dfrac{-2\pm\sqrt{-16}}{2}=\dfrac{-2\pm4i}{2}=-1\pm2i\). Check \(x=-1+2i\): \((-1+2i)^2+2(-1+2i)+5 = (1-4i-4)+(-2+4i)+5 = (-3-4i)+(-2+4i)+5 = 0\) &#10003;.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Without solving, state whether \(x^2-5x+11=0\) has real or complex solutions, and why.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(b^2-4ac = 25-44 = -19 &lt; 0\), so the equation has two complex solutions, a conjugate pair &mdash; the discriminant's sign alone answers this without solving the equation at all.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Writing \(\sqrt{-36}\) as \(6i\) without first factoring, or worse, treating \(\sqrt{-36}\) as if the ordinary rule \(\sqrt{a}\cdot\sqrt{b}=\sqrt{ab}\) still applies to negative numbers under the root. That product rule for radicals is proven only for nonnegative \(a\) and \(b\); applying it carelessly to two negative radicands can produce a sign error. The reliable method is always to factor out \(\sqrt{-1}=i\) first &mdash; \(\sqrt{-36}=\sqrt{36}\cdot\sqrt{-1}=6i\) &mdash; and then simplify the remaining real radical normally.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Cardano's original 1545 problem &mdash; dividing \(10\) into two parts with product \(40\) &mdash; leads to exactly this lesson's kind of equation: \(x(10-x)=40\) rearranges to \(x^2-10x+40=0\), whose discriminant is \(100-160=-60\), giving the complex solutions \(5\pm i\sqrt{15}\) that so troubled him. Four hundred and eighty years later, the method for handling it is a routine part of a precalculus course &mdash; a fair measure of how far mathematical courage, once exercised, becomes ordinary competence for everyone who follows.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>A negative discriminant does not mean a quadratic has no solutions; it means the quadratic's solutions are complex, and today you confirmed &mdash; by direct substitution, the same standard you would apply to any real solution &mdash; that those complex solutions are genuinely correct. The conjugate-pair pattern you saw in every example is not a coincidence of these particular equations; it is a guaranteed feature of any real-coefficient polynomial, and it is the same reflection-across-the-real-axis relationship you met geometrically in Lesson 9-1. Tomorrow, the modulus you have already been computing gets a partner &mdash; an angle &mdash; and together they give every complex number a second, equally useful address: its polar form.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does a negative discriminant guarantee that a quadratic's solutions are complex rather than real?</p>
+    <p>2. Why is substituting a claimed complex solution back into the original equation a more trustworthy check than simply re-deriving it with the quadratic formula a second time?</p>
+    <p>3. Why must the two non-real solutions of a real-coefficient quadratic always be conjugates of each other?</p>
+    <p>4. What responsibility do you take on when you use an AI tool to generate practice problems, and why does that responsibility not disappear just because the AI produced a confident-looking answer?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">9-3 &middot; Solving Problems with Complex Numbers</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

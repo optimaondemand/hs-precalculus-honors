@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Applied Task</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 7</div>
+        <div style="font-size: 13px; color: #666;">Trigonometric Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Assignment Type</div>
+        <div style="font-size: 18px; color: #0e1c42;">Applied Modeling Task</div>
+        <div style="font-size: 13px; color: #666;">Excel &middot; Assigned in Week 23 &middot; Completion-Scored</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Points</div>
+        <div style="font-size: 16px; color: #0e1c42;">Assignment</div>
+        <div style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 14px; padding: 3px 12px; border-radius: 10px; margin-top: 6px;">10 pts</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">Unit 7 Applied Task</div>
+        <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Daylight by Latitude</div>
+        <div style="font-size: 15px; color: #666;">Excel Modeling Task &middot; 10 pts</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128203; THE SCENARIO</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <p style="margin-top: 0;">In 1822, Joseph Fourier made an audacious claim: almost any periodic phenomenon &mdash; no matter how jagged or lopsided it looks &mdash; can be built from nothing but sums of sines and cosines. Lesson 7-7 gave you the simplest possible test case: a single sine wave, fit to a single real rhythm. Daylight is one of the cleanest examples nature offers. Every point on Earth's surface is governed by the very same orbital law &mdash; the same 365-day trip around the sun, the same 23.5&deg; tilt of the axis &mdash; and yet no two latitudes experience that law identically. That is this unit's virtue in miniature: <strong>self-government</strong> is not chaos held in check by force; it is disciplined, periodic order that governs itself, the same law expressed differently depending on where you stand to observe it.</p>
+            <p style="margin-bottom: 0;">Your task: pull a real year of day-length data for two cities at genuinely different latitudes, build a sinusoidal model for each by hand &mdash; the honors move, since Excel has no built-in sinusoidal trendline &mdash; and then explain, in the language of amplitude, midline, and phase shift, exactly what the clockwork sky is doing differently at each location.</p>
+        </div>
+    </div>
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 6px; padding: 16px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 10px;">&#127919; FOCUS QUESTION</div>
+        <div style="font-size: 20px; color: #0e1c42; font-style: italic; line-height: 1.6;">Two cities, one orbit. What in your two sinusoidal models has to come out nearly identical because the law governing both is the same &mdash; and what has to come out different, and why, because of where each city stands on the globe?</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #0E1C42;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; THE TASK</div>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Part 1 &mdash; Get the data on record.</strong> Choose two cities: <strong>City A</strong>, a natural default being your own home city, and <strong>City B</strong>, a city at a genuinely different latitude &mdash; one much closer to the equator than City A, or much closer to a pole (for example, a city near the equator like Quito versus a city near a pole like Troms&oslash; illustrates the kind of contrast you are after; these are only examples of the <em>range</em> of latitudes to consider, not data sources). For each city, find a real, public source for a year of daylight data &mdash; a national weather service, a government astronomical almanac, or a reputable sunrise&ndash;sunset reference site &mdash; and record at least <strong>12 data points per city</strong> (day length in hours, or sunrise and sunset time converted to day length, on the 1st of each month is the natural sampling; a comparable regular sampling is fine too). On a sheet named <strong>Data</strong>, enter day-of-year in one column and day length in hours in the next, for both cities, and cite your source for each city in a labeled cell at the top. Real data only: no invented numbers, no smoothing away a wobble your source actually reports.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Part 2 &mdash; Fit sinusoidal models, twice.</strong> On a sheet named <strong>Model</strong>, make a scatter chart of each city's day length against day-of-year. Excel has no built-in sinusoidal trendline, so you will build this model the honors way &mdash; by hand, straight from your own data's key features, exactly as you did in Lesson 7-7:</p>
+        <ul style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <li><strong>Amplitude</strong> \(A\) = half the swing between your longest and shortest day: \(A = \dfrac{\text{max} - \text{min}}{2}\).</li>
+            <li><strong>Midline</strong> \(D\) = the average of the longest and shortest day: \(D = \dfrac{\text{max} + \text{min}}{2}\).</li>
+            <li><strong>Period</strong>: a full cycle of seasons takes one year, so \(B = \dfrac{2\pi}{365}\) (radians per day) &mdash; this should come out essentially the same for both cities, since both orbit the same sun on the same schedule.</li>
+            <li><strong>Phase shift</strong> \(C\) = the day-of-year on which each city reaches its <em>maximum</em> day length (read straight off your data, or off the equinox crossing if you prefer to anchor there instead).</li>
+        </ul>
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;">Write each city's model as \(y = A\cos\big(B(x - C)\big) + D\), where \(x\) is day-of-year and \(y\) is day length in hours. Put \(A\), \(D\), \(B\), and \(C\) in labeled cells for each city, then add a model column that computes \(y\) for every day-of-year with one formula copied down &mdash; for example, if your amplitude, midline, and phase-shift cells for City A are named or referenced as <code>$F$1</code>, <code>$F$2</code>, and <code>$F$3</code>, the model column reads <code>=$F$2 + $F$1*COS((2*PI()/365)*(A2-$F$3))</code> (note that \(B\) is already in radians per day, so no separate degrees-to-radians conversion is needed here). Plot that smooth model curve on the <em>same</em> chart as your raw data points, for <strong>both cities, side by side</strong>, so you can see with your own eyes how closely the hand-built curve tracks the real record.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Part 3 &mdash; Interpret the parameters physically.</strong> On a sheet named <strong>Answers</strong>, in full sentences citing your own cells, state each city's amplitude, midline, and phase shift. Then explain, physically:</p>
+        <ul style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <li>Why the <strong>higher-latitude city has the larger amplitude</strong> &mdash; a bigger swing between its longest summer day and shortest winter day &mdash; while the <strong>lower-latitude city has the smaller amplitude</strong>, its day length staying much closer to 12 hours all year. (The closer a location sits to the equator, the more evenly the axial tilt divides its daylight across the seasons; the closer to a pole, the more extreme that division becomes.)</li>
+            <li>Why both cities' midlines should land very close to <strong>12 hours</strong> regardless of latitude &mdash; averaged across a full year, every point on Earth receives almost exactly half a day of sunlight and half a night, tilt notwithstanding.</li>
+            <li>Why both cities should have very nearly the <strong>same period</strong> (365 days) &mdash; the same orbit, the same clock, for everyone on the planet.</li>
+            <li>Why the two curves' <strong>peaks and troughs should land on nearly the same day of year</strong> &mdash; both hemispheres' seasons are driven by the same orbital mechanics. <strong>Exception:</strong> if you chose a Southern Hemisphere city, note that its peak day length falls roughly <strong>six months out of phase</strong> from a Northern Hemisphere city's peak (its summer is the other city's winter), and explain why that phase difference is exactly what the shared orbital law predicts, not a contradiction of it.</li>
+        </ul>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Part 4 &mdash; The AI round.</strong> On the Answers sheet, write a short paragraph (4&ndash;6 sentences) defending why your model's period and phase-shift choices are physically reasonable &mdash; not just numerically fitted, but justified by what you know about Earth's orbit and axial tilt. Paste that paragraph to your AI tutor and ask it to critique your argument. Then write the final entry: a <strong>critique of the critique</strong> &mdash; what the AI got right, what it missed or confidently invented, and your final verdict, signed with your name. The same supervision discipline you have practiced all unit &mdash; catching an AI that skips a conversion step or assumes what it must prove &mdash; applies here to your own physical reasoning and to your critic's.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 0;"><strong>Honors stretch (optional):</strong> The amplitude of a location's day-length curve grows with distance from the equator &mdash; roughly zero amplitude at the equator, growing toward its largest values near the poles. Using only your City A amplitude, and whatever relationship between latitude and day-length amplitude you can find or reason toward (ask your AI tutor to help you locate or derive an approximate relationship, and show your work), estimate City A's latitude. Compare your estimate to the city's actual latitude (easy to look up) and discuss, in two or three sentences, why they likely do not match exactly &mdash; real day-length curves are not perfectly sinusoidal near the poles, atmospheric refraction bends light enough to extend apparent day length slightly everywhere, and any approximate formula trades some accuracy for simplicity.</p>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128193; M365 REMINDER</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Work in Excel from your <strong>school Microsoft account</strong>. Name the workbook <strong>LastName_FirstName_DaylightByLatitude_Precalculus.xlsx</strong> and save it to your <strong>Optima &rarr; Math &rarr; PrecalculusHonors</strong> folder in OneDrive before submitting.
+        <br /><span style="font-size: 15px; color: #1B6A94;"><em>M365 Skill You&rsquo;re Practicing: hand-built sinusoidal modeling from data-derived parameters, side-by-side scatter-and-model charting, and source documentation in named cells (Excel &mdash; MOS Core).</em></span></div>
+    </div>
+
+    <div style="background: #EEF1F8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#9989; SUCCESS CRITERIA</div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">My workbook has the three required sheets (Data, Model, Answers); the Data sheet holds at least 12 real, unedited data points per city, for two cities at genuinely different latitudes, each with its source named in a labeled cell.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">The Model sheet shows, for both cities side by side, a scatter chart of day length vs. day-of-year, the labeled amplitude/midline/period/phase-shift cells, the hand-built model formula copied down a column, and the model plotted as a smooth curve against the raw data points.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">The Answers sheet states both cities' amplitude, midline, and phase shift in full sentences citing my own cells, and correctly explains why the higher-latitude city has the larger amplitude, why both midlines are near 12 hours, why both periods are near 365 days, and why the peaks/troughs align (or are six months out of phase, if I chose a Southern Hemisphere city).</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">The AI round is complete and honest: my defense paragraph, the AI&rsquo;s critique, and my signed critique of the critique &mdash; including anything the AI caught that I had to concede.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128202; HOW THIS IS SCORED</div>
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 0;"><strong>Completion-scored (10 pts):</strong> full credit for a working, formula-driven workbook built on real, sourced data for two genuinely different latitudes, meeting the success criteria. A worked model workbook is released after the due date &mdash; your two cities will rightly differ from everyone else&rsquo;s, but your Model sheet&rsquo;s structure and your physical reasoning should hold up beside it. The four-criterion standard (understanding, reasoning, presentation, honesty) applies to your written answers exactly as it does on paper &mdash; and on this task, honesty includes the source cells, the unedited data, and conceding the AI&rsquo;s good points.</p>
+    </div>
+
+    <div style="background: #FDF3E3; border-left: 5px solid #C7922C; border-radius: 6px; padding: 18px 22px; margin-bottom: 24px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128228; SUBMISSION INSTRUCTIONS</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Canvas Assignment Name:</strong> Unit 7 Applied Task &middot; Daylight by Latitude</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;">Submit the Excel workbook itself (not a PDF) through Canvas using the <strong>OneDrive tab</strong> on the submission screen, so your live file comes through with its formulas and charts intact.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Due:</strong> End of Week 25, ahead of Unit 7's synthesis week &mdash; see the Canvas due date. Assigned now, in Week 23, so you have two full weeks to source a year of real data for both cities; the flex days are a natural time for the sourcing, entering, and charting work.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Fourier claimed the whole world of periodic motion reduces to sums of sines. You just tested that claim against the actual sky over two real cities, read the clockwork's own parameters back out of your data, and put your reasoning &mdash; and an AI's &mdash; on the record. That is self-government practiced on paper: the same disciplined law, honestly reported wherever you find it.</div>
+    </div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Trigonometric Functions</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">Unit 7 Applied Task &middot; Daylight by Latitude</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

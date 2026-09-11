@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Assignment 8-8</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 8</div>
+        <div style="font-size: 13px; color: #666;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">Lesson 8-8</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Paired Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42; font-style: italic;">Eliminating the Parameter; Parametric Graphs with Technology</div>
+        <div style="font-size: 13px; color: #666;">Practice Set &middot; Completion-Scored</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Points</div>
+        <div style="font-size: 16px; color: #0e1c42;">Assignment</div>
+        <div style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 14px; padding: 3px 12px; border-radius: 10px; margin-top: 6px;">10 pts</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">Lesson 8-8</div>
+        <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Practice Set: Translating Back</div>
+        <div style="font-size: 15px; color: #666;">Assignment &middot; 10 pts</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128203; ASSIGNMENT OVERVIEW</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">This set drills eliminating the parameter to recover a rectangular equation, tracking every domain restriction the parametrization imposes, and exploring a cycloid qualitatively through a table of values. This is a <strong>practice set</strong>: scored for honest completion, with worked solutions released after the due date for line-by-line self-correction.</div>
+    </div>
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 6px; padding: 16px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 10px;">&#127919; FOCUS QUESTION</div>
+        <div style="font-size: 20px; color: #0e1c42; font-style: italic; line-height: 1.6;">Eliminating the parameter can produce a technically correct equation that still describes more points than the original curve ever did. What habit closes that gap for good?</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #0E1C42;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; PROBLEM SET</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">Show your work in neat vertical form. Every problem that involves a restriction on \(t\) requires you to check at least one point from the original parametric equations against your final rectangular equation.</p>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">1</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Eliminate the parameter:</strong> \(x=t-3\), \(y=4t+2\), \(t\) any real number. State whether any restriction applies.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">2</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Eliminate with a restriction:</strong> \(x=\sqrt{t}\), \(y=t-5\), \(t\ge0\). State the domain restriction on \(x\), and check your rectangular equation against the point produced at \(t=9\).</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">3</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Eliminate using an identity:</strong> \(x=2\cos\theta\), \(y=2\sin\theta\), \(\theta\in[0,2\pi]\). Use the Pythagorean identity to find the rectangular equation.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">4</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Eliminate with a restricted range:</strong> \(x=2\cos\theta\), \(y=2\sin\theta\), but now \(\theta\in[\pi,2\pi]\) only. State the resulting restriction on \(y\), and check it against the point produced at \(\theta=\frac{3\pi}{2}\).</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">5</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Explain why:</strong> In three or four sentences, explain why eliminating the parameter from \(x=\sqrt{t}\), \(y=2t+1\) (\(t\ge0\)) and forgetting the restriction \(x\ge0\) produces an equation describing <em>more</em> points than the original parametrization actually draws.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">6</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Honors stretch:</strong> Without eliminating the parameter algebraically, build a table for the cycloid \(x=t-\sin t\), \(y=1-\cos t\) at \(t=0,\frac{\pi}{2},\pi,\frac{3\pi}{2},2\pi\). Describe the resulting shape in two or three sentences, including where it reaches its greatest height and where it returns to \(y=0\).</div>
+        </div>
+
+        <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0 0 0;">
+            <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; CHECK YOURSELF WITH DESMOS</div>
+            <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">After solving Problems 2 and 4 by hand, graph both the parametric form (as an ordered pair using \(t\) or \(\theta\)) and your eliminated rectangular equation at <a href="https://www.desmos.com/calculator">desmos.com/calculator</a>, restricting the rectangular graph's domain in Desmos's curly-brace notation (e.g. <strong>y = 2x^2 + 1 {x >= 0}</strong>) to match the restriction you found. The two graphs should occupy exactly the same set of points. For Problem 6, graph <strong>(t - sin(t), 1 - cos(t))</strong> with \(t\) from \(0\) to \(2\pi\) and confirm your table's shape.</div>
+        </div>
+    </div>
+
+    <div style="background: #EEF1F8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#9989; SUCCESS CRITERIA</div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">I attempted every problem, including the honors stretch, with visible work.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">Every restriction problem states the restriction explicitly and checks it against at least one point from the original parametric equations.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">The cycloid table is built directly from substitution, not estimated.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">Where I got stuck, I named the gap honestly on the page instead of leaving a blank or bluffing.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; overflow-x: auto;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128202; HOW THIS IS SCORED</div>
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>This practice set is scored for completion (10 pts):</strong> full credit means every problem is attempted with visible work. After the due date, worked solutions are released &mdash; compare your work line by line, mark each miss, and redo it. That self-correction is the real assignment.</p>
+        <p style="font-size: 15px; color: #666; font-style: italic;">The standard below governs all written work in this course, all year. Hold your pages to it now; it is exactly the rubric your teacher applies on Focus assignments and unit tests.</p>
+        <table style="width: 100%; border-collapse: collapse; min-width: 580px;">
+            <thead>
+                <tr style="background: #0E1C42;">
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">Standard of Work</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">What it looks like on the page</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="background: #FFFFFF;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; width: 220px; vertical-align: top;">Understanding of the material</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">The parameter is eliminated correctly and every domain or range restriction it imposes is stated and checked against a real point.</td>
+                </tr>
+                <tr style="background: #F4F6FA;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Quality of reasoning</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">The explain-why and honors-stretch responses reason from what a square root, an even power, or a restricted range actually forbids, not from memorized rules alone.</td>
+                </tr>
+                <tr style="background: #FFFFFF;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Presentation &amp; precision</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Substitution steps are shown in full; restrictions are stated in precise inequality notation; tables are neatly aligned.</td>
+                </tr>
+                <tr style="background: #F4F6FA;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Intellectual honesty</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Work shown faithfully; gaps and uncertainty named rather than bluffed.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div style="background: #FDF3E3; border-left: 5px solid #C7922C; border-radius: 6px; padding: 18px 22px; margin-bottom: 24px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128228; SUBMISSION INSTRUCTIONS</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Canvas Assignment Name:</strong> Assignment 8-8 &middot; Practice Set: Translating Back</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;">Solve every problem by hand on paper. When you finish, photograph or scan your pages, combine them into <strong>one PDF</strong> with the pages in order, and upload the single file here. Name the file <strong>LastName_FirstName_Precalculus_8-8.pdf</strong>.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Due:</strong> See the Canvas due date. Aim to finish before your flex day, so the flex day is free for revision and catch-up.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">A parametrization's restriction is not a footnote &mdash; check one honest point, and it will tell you whether you kept the whole truth or only part of it.</div>
+    </div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Polar Coordinates &amp; Parametric Equations</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">Assignment 8-8 &middot; Practice Set: Translating Back</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

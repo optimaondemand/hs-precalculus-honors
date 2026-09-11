@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 7-6</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 7</div>
+        <div style="font-size: 13px; color: #666;">Trigonometric Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">7-6</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Trigonometric Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">7-6</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Choosing a Periodic Model</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to choose sine, cosine, or tangent to model a periodic phenomenon, given its amplitude, frequency or period, midline, and starting condition.</p></li>
+        <li><p>I will be able to write the equation of a sinusoidal model in the form \(y = A\sin(B(x-C)) + D\) or \(y = A\cos(B(x-C)) + D\) directly from a description of the phenomenon's behavior.</p></li>
+        <li><p>I will be able to explain, from the definitions themselves, why sine and cosine are the natural choice for a smooth periodic phenomenon and why tangent is not.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Sinusoidal model</strong>: An equation of the form \(y = A\sin(B(x-C)) + D\) or \(y = A\cos(B(x-C)) + D\) built to describe a real, measured periodic phenomenon &mdash; a rider's height on a wheel, a temperature record, a tide.</p>
+    <p><strong>Amplitude</strong> (\(A\)): Half the distance between the phenomenon's maximum and minimum values, \(A = \dfrac{\text{max} - \text{min}}{2}\) &mdash; how far the quantity swings above and below its center.</p>
+    <p><strong>Midline</strong> (\(D\)): The horizontal line the phenomenon oscillates around, \(D = \dfrac{\text{max} + \text{min}}{2}\) &mdash; the average of the extremes, not necessarily zero.</p>
+    <p><strong>Angular frequency</strong> (\(B\)): The constant that compresses or stretches the cycle to match the phenomenon's actual period, found from \(B = \dfrac{2\pi}{\text{period}}\).</p>
+    <p><strong>Phase shift</strong> (\(C\)): The horizontal shift that lines the model up with when the phenomenon actually reaches its reference point (its maximum, for a cosine model with \(C=0\)).</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>A periodic phenomenon does not consult you before it repeats. A Ferris wheel keeps its own six-minute schedule whether or not you are watching; the Earth keeps its own year-long schedule whether or not anyone measures the temperature. This is precisely why sine and cosine &mdash; functions that repeat on a fixed, unbending schedule &mdash; are the right instrument for describing such things, and it is why this unit's virtue, <strong>self-government</strong>, belongs here with unusual precision. A sinusoidal model is trustworthy exactly because it governs itself: once you fix its amplitude, its period, and its midline, it never wanders from them. It does not have a good day or a bad day. Every cycle is the same cycle. That discipline is what makes it possible to predict, from a model built today, what a wheel or a tide or a temperature will do next March.</p>
+
+    <p>Today's task is not to build new machinery &mdash; you already know sine and cosine, their graphs, their period, their amplitude. Today's task is <em>judgment</em>: given a real phenomenon described in words, which function do you reach for, and how do you tune its four parameters (\(A\), \(B\), \(C\), \(D\)) so the model actually matches what was described?</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The General Sinusoidal Model, Parameter by Parameter</strong></h4>
+        <p style="text-align: center;">\(y = A\sin(B(x-C)) + D \qquad \text{or} \qquad y = A\cos(B(x-C)) + D\)</p>
+        <p>Every parameter is read directly off the phenomenon's description &mdash; none of them require guessing:</p>
+        <p><strong>Amplitude</strong> \(A = \dfrac{\text{max} - \text{min}}{2}\) &mdash; how far the swing reaches above (and below) center.</p>
+        <p><strong>Midline</strong> \(D = \dfrac{\text{max} + \text{min}}{2}\) &mdash; the center the swing is measured from.</p>
+        <p><strong>Angular frequency</strong> \(B = \dfrac{2\pi}{\text{period}}\) &mdash; period is how long one full cycle actually takes, in whatever unit \(x\) is measured in (minutes, days, seconds); \(B\) rescales the sine or cosine wave's natural \(2\pi\)-length cycle to match it.</p>
+        <p style="margin-bottom: 0;"><strong>Phase shift</strong> \(C\) &mdash; where the model's reference point (a cosine model's maximum, when \(C=0\); a sine model's midline-crossing-while-rising, when \(C=0\)) actually falls on the real timeline.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>How to Choose: Where Does the Data Start?</strong></h4>
+        <p>Sine and cosine are the <em>same</em> curve, one shifted a quarter-period from the other &mdash; so either can always model any sinusoidal phenomenon, if you are willing to solve for the right phase shift \(C\). But one choice is almost always less algebra than the other, and the test is simple: <strong>look at what the phenomenon is doing when your independent variable equals its starting value.</strong></p>
+        <p>Cosine, with \(C=0\), starts <em>at its maximum</em>: \(\cos(0) = 1\). So if the description starts a phenomenon at a maximum (or, with a sign flip on \(A\), at a minimum), reach for cosine &mdash; you need no phase shift at all.</p>
+        <p style="margin-bottom: 0;">Sine, with \(C=0\), starts <em>at its midline, rising</em>: \(\sin(0) = 0\), and sine is increasing just after \(0\). So if the description starts a phenomenon at its center value and tells you which direction it is moving, reach for sine. Neither choice is a rule handed down from outside; it is a judgment you make by reading the phenomenon's own starting condition &mdash; the same self-governing discipline that lets you trust the model afterward.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>A Ferris wheel has diameter \(40\) m, and its hub (center) is mounted \(22\) m above the ground. The wheel completes one full revolution every \(6\) minutes. A rider boards at the bottom of the wheel at \(t=0\). Find a model \(h(t)\) for the rider's height above the ground, in meters, \(t\) minutes after boarding.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The wheel's radius is half its diameter: \(20\) m. The hub sits at \(22\) m, so the highest point on the wheel is \(22 + 20 = 42\) m and the lowest point &mdash; the boarding platform &mdash; is \(22 - 20 = 2\) m. That gives amplitude and midline directly:</p>
+    <p style="text-align: center;">\(A = \dfrac{42-2}{2} = 20 \qquad D = \dfrac{42+2}{2} = 22 \qquad B = \dfrac{2\pi}{6} = \dfrac{\pi}{3}\)</p>
+    <p>The rider boards at the <em>bottom</em> &mdash; the minimum &mdash; not the maximum, so an unflipped cosine model (which starts at the max) is wrong here; flip its sign so it starts at the min instead:</p>
+    <p style="text-align: center;">\(h(t) = -20\cos\!\left(\dfrac{\pi}{3}t\right) + 22\)</p>
+    <p><span style="color: #e62429;"><strong>Verify:</strong></span> \(h(0) = -20\cos(0) + 22 = -20(1) + 22 = 2\) m &mdash; matches the boarding height. At the half-revolution mark, \(t=3\): \(h(3) = -20\cos(\pi) + 22 = -20(-1) + 22 = 42\) m &mdash; matches the top of the wheel exactly.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(h(t) = -20\cos\!\left(\dfrac{\pi}{3}t\right) + 22\). Notice why the negative sign was not optional: without it, the model would claim the rider boards at the <em>top</em> of the wheel, which is simply false to the problem &mdash; the sign is not decoration, it is the model keeping faith with the stated starting condition.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A city's average daily temperature reaches its yearly maximum of \(90^\circ\)F around day \(200\) of the year, and its yearly minimum of \(40^\circ\)F. Model the average temperature \(T(t)\) as a function of the day of the year, \(t\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(A = \dfrac{90-40}{2} = 25 \qquad D = \dfrac{90+40}{2} = 65 \qquad B = \dfrac{2\pi}{365}\)</p>
+    <p>The maximum is given directly at \(t = 200\), so cosine (which peaks exactly at \(x=C\)) needs no sign flip &mdash; only a phase shift of \(C = 200\):</p>
+    <p style="text-align: center;">\(T(t) = 25\cos\!\left(\dfrac{2\pi}{365}(t-200)\right) + 65\)</p>
+    <p><span style="color: #e62429;"><strong>Verify:</strong></span> \(T(200) = 25\cos(0) + 65 = 25+65 = 90\) &mdash; matches. The model's minimum should fall exactly half a period (\(365/2 = 182.5\) days) away from its maximum: \(t = 200 - 182.5 = 17.5\), day \(18\) &mdash; mid-January. \(T(17.5) = 25\cos(\pi) + 65 = -25+65 = 40\) &mdash; matches, and mid-January is exactly when you would expect the coldest average temperature of the year. That agreement is not a coincidence; it is the reasonableness check a model owes you before you trust it.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(T(t) = 25\cos\!\left(\dfrac{2\pi}{365}(t-200)\right) + 65\).</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE FORGOTTEN SIGN</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student gave an AI tool the same Ferris wheel setup as Example 1 &mdash; diameter \(40\) m, hub at \(22\) m, period \(6\) minutes, rider boards at the bottom &mdash; and asked it to build the height model. It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;\(h(t) = 20\cos\!\left(\dfrac{\pi}{3}t\right) + 22\). This models the rider's height above the ground in meters.&rdquo;</p>
+            <p>The amplitude, midline, and angular frequency are all correct &mdash; the AI clearly read the data properly. But it dropped the negative sign. Before accepting the claim, run the same check Example 1 used: plug in the stated starting condition. \(h(0) = 20\cos(0) + 22 = 20 + 22 = 42\) m &mdash; the AI's model claims the rider boards at the <em>top</em> of the wheel, \(42\) m up, which flatly contradicts the problem's own words.</p>
+            <p style="margin-bottom: 0;">The fix is exactly the sign Example 1 kept: \(h(t) = -20\cos\!\left(\dfrac{\pi}{3}t\right) + 22\), which correctly gives \(h(0)=2\) m. The lesson is not that AI got the arithmetic wrong &mdash; it did not &mdash; but that it treated "starts at the bottom" as a detail to be absorbed silently rather than a condition the finished model must be checked against. A mathematician who supervises a tool always performs that same one-line check: does the model, evaluated at the starting point you were given, actually reproduce the starting value you were given?</p>
+        </div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A phenomenon has maximum value 20 and minimum value 4, with period 8, and it starts (at its independent-variable value of 0) at its maximum. Build the model.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(A = \dfrac{20-4}{2} = 8\), \(D = \dfrac{20+4}{2} = 12\), \(B = \dfrac{2\pi}{8} = \dfrac{\pi}{4}\). Starting at the maximum calls for an unflipped cosine: \(y = 8\cos\!\left(\dfrac{\pi}{4}x\right) + 12\). Check: \(y(0) = 8(1)+12 = 20\) &mdash; matches the stated maximum.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Given \(y = 6\sin\!\left(\dfrac{\pi}{3}(t-2)\right) + 10\), state its amplitude, period, midline, and phase shift, and find \(y(2)\) without a calculator.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Amplitude \(6\), midline \(10\), phase shift \(2\). Period \(= \dfrac{2\pi}{\pi/3} = 6\). At \(t=2\), the sine's argument is \(0\), so \(y(2) = 6\sin(0)+10 = 10\) &mdash; the model sits exactly on its midline at \(t=2\), which is exactly what a phase shift of \(2\) on a sine model should produce.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Two errors show up constantly in this kind of modeling. First, forgetting the sign flip on \(A\) when a phenomenon starts at a <em>minimum</em> rather than a maximum &mdash; exactly the AI's error above. Second, inverting the frequency formula: writing \(B = 2\pi \cdot \text{period}\) instead of \(B = \dfrac{2\pi}{\text{period}}\). A period of \(6\) minutes should <em>compress</em> the wave to complete a cycle quickly, which means dividing by \(6\), not multiplying by it; if your "period" check on the finished model comes out absurdly long or short, this inversion is the first place to look.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; ON YOUR CALCULATOR</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">In Desmos (<a href="https://www.desmos.com/calculator">desmos.com/calculator</a>), build a model with sliders instead of committing to fixed numbers: type <strong>y = A*cos(B*(x-C)) + D</strong> and Desmos will offer to create sliders for \(A\), \(B\), \(C\), and \(D\) automatically &mdash; click "all" to add them. Drag each slider and watch the graph's amplitude, period, phase, and vertical position respond in real time. Then plot the two data points you actually know (for Example 2, the point \((200, 90)\) and the point \((17.5, 40)\)) as a table, and adjust the sliders until the curve passes through both. This is the calculator confirming visually what your algebra already found exactly &mdash; a genuine check, not a replacement for the reasoning.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Every model built today started from the same four questions, asked in order: what is the maximum and minimum (giving \(A\) and \(D\)), what is the period (giving \(B\)), and where &mdash; at a maximum, a minimum, or a rising or falling midline crossing &mdash; does the phenomenon begin (giving your choice of sine or cosine, and the value of \(C\)). Today those numbers arrived as clean, stated facts: a diameter, a period in minutes, a day of the year. That will not always be true. This week's Focus lesson, 7-7, hands you the same four questions attached to real recorded data &mdash; daylight hours across a year, tide heights across a day &mdash; where the maximum and minimum have to be read off a table before you can even begin, and where the discipline of checking your model against the data becomes the whole point.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does a phenomenon's starting condition &mdash; not a fixed rule &mdash; determine whether sine or cosine is the more natural model?</p>
+    <p>2. In the Ferris wheel example, what would go wrong with the model if the negative sign on \(A\) were dropped, and how does plugging in \(t=0\) reveal that error?</p>
+    <p>3. Why is a sinusoidal model's unwavering commitment to its own amplitude, period, and midline &mdash; its self-governing consistency &mdash; exactly what makes it trustworthy for prediction?</p>
+    <p>4. What must be true about a real-world phenomenon for a single sine or cosine curve to model it honestly, and what might make that assumption fail?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">7-6 &middot; Choosing a Periodic Model</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

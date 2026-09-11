@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 8-8</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 8</div>
+        <div style="font-size: 13px; color: #666;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">8-8</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">8-8</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Eliminating the Parameter; Parametric Graphs with Technology</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to eliminate the parameter from a pair of parametric equations to find an equivalent rectangular equation.</p></li>
+        <li><p>I will be able to identify a domain restriction that a parametrization imposes and that the bare rectangular equation would otherwise miss, and confirm it with a point check.</p></li>
+        <li><p>I will be able to use a graphing calculator's parametric mode to explore a cycloid and a Lissajous-style curve and describe each one's shape qualitatively.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Eliminating the parameter</strong>: solving one parametric equation for \(t\) and substituting the result into the other, to produce a single equation relating \(x\) and \(y\) directly.</p>
+    <p><strong>Domain restriction</strong>: a limitation on which \(x\)- or \(y\)-values actually occur, imposed by the parametrization itself, that the eliminated rectangular equation does not automatically carry.</p>
+    <p><strong>Cycloid</strong>: the curve traced by a fixed point on the rim of a circle as the circle rolls without slipping along a straight line.</p>
+    <p><strong>Lissajous curve</strong>: a curve traced by a point whose horizontal and vertical motions are each sinusoidal but run at different frequencies, producing a family of looping, woven shapes.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>A parametric equation tells a richer story than a rectangular one &mdash; but this entire course, before this week, has only ever asked you to work with the plainer story: one equation, \(x\) and \(y\) related directly, no clock running underneath. Today you learn to translate backward, from the richer story to the plainer one, and &mdash; just as carefully &mdash; to notice exactly what that translation quietly loses along the way.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Eliminating the Parameter, Without Losing the Restriction</strong></h4>
+        <p>To eliminate the parameter from \(x=f(t)\), \(y=g(t)\): solve one equation for \(t\), then substitute that expression into the other. The resulting equation in \(x\) and \(y\) alone describes the same set of points &mdash; <em>provided</em> you carry forward any restriction the original parametrization placed on \(x\) or \(y\). A square root, an even power, or a restricted range for \(t\) can each mean the parametrized curve is only <em>part</em> of what the bare rectangular equation would otherwise describe. Skipping that check does not produce a wrong equation &mdash; it produces a right equation describing the wrong (too large) set of points. Always confirm the result with an actual point from the original parametrization.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Eliminate the parameter from \(x=t+2\), \(y=3t-1\), with \(t\) any real number.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Solve the first equation for \(t\): \(t=x-2\). Substitute into the second:</p>
+    <p style="text-align: center;">\(y=3(x-2)-1=3x-7\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(y=3x-7\), with no restriction, since \(t\) ranges over all real numbers and so, therefore, do both \(x\) and \(y\). A full line, exactly as Example 1 of yesterday's lesson already suggested by its table of values.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Eliminate the parameter from \(x=\sqrt{t}\), \(y=2t+1\), with \(t\ge0\), and state any domain restriction.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Solve the first equation for \(t\): since \(x=\sqrt t\), squaring gives \(t=x^2\). But notice: \(\sqrt t\) is never negative, so \(x\ge0\) always, no matter what \(t\) is. Substitute \(t=x^2\) into the second equation:</p>
+    <p style="text-align: center;">\(y=2x^2+1, \qquad x\ge0\)</p>
+    <p>Check with a point: at \(t=4\), the parametric equations give \(x=\sqrt4=2\), \(y=2(4)+1=9\); the rectangular equation gives \(y=2(2)^2+1=9\). &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(y=2x^2+1\) for \(x\ge0\) only &mdash; the right half of the parabola. Without the restriction, \(y=2x^2+1\) alone would also include a point like \((-2,9)\), but no value of \(t\ge0\) ever produces \(x=-2\), since a square root cannot be negative. The restriction is not optional bookkeeping; it is the difference between describing the actual curve and describing a larger curve the parametrization never draws.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Eliminate the parameter from \(x=\cos\theta\), \(y=\sin\theta\), \(\theta\in[0,2\pi]\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Square both equations and add, using the Pythagorean identity:</p>
+    <p style="text-align: center;">\(x^2+y^2=\cos^2\theta+\sin^2\theta=1\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x^2+y^2=1\), the full unit circle, with no restriction &mdash; every point on the circle is reached by some \(\theta\) in \([0,2\pi]\). Notice what was lost in the elimination, though: the rectangular equation no longer says which direction the circle was traced, or where the motion started. That information &mdash; orientation &mdash; lives only in the parametric form, never in the eliminated one.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Eliminate the parameter from \(x=\cos\theta\), \(y=\sin\theta\), but now restricted to \(\theta\in[0,\pi]\) only.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The algebra is identical to Example 3: \(x^2+y^2=1\). But for \(\theta\in[0,\pi]\), sine is never negative, so \(y=\sin\theta\ge0\) throughout.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(x^2+y^2=1\) with \(y\ge0\) &mdash; the upper semicircle only. Check a point: at \(\theta=\frac{3\pi}{2}\) (outside this restricted domain), the full circle would include \((0,-1)\), but no \(\theta\) in \([0,\pi]\) produces that point, confirming the lower half is genuinely excluded.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: Two Curves Technology Reveals Best</strong></h4>
+        <p><strong>Cycloid:</strong> \(x=a(t-\sin t)\), \(y=a(1-\cos t)\) &mdash; the path traced by a single point on the rim of a circle of radius \(a\) as the circle rolls along a straight line. Every arch reaches a maximum height of \(2a\) and returns to the line, then repeats.</p>
+        <p style="margin-bottom: 0;"><strong>Lissajous curve:</strong> \(x=\sin(at+\delta)\), \(y=\sin(bt)\) &mdash; two sinusoidal motions at different frequencies \(a\) and \(b\), combined at right angles. When \(\frac{a}{b}\) is a ratio of whole numbers, the curve closes into a repeating woven pattern; change the ratio and the whole family of shapes changes with it.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Without eliminating the parameter algebraically, describe qualitatively what the cycloid \(x=t-\sin t\), \(y=1-\cos t\) looks like for \(t\in[0,4\pi]\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Here \(a=1\). At \(t=0\): \((0,0)\). At \(t=\pi\): \(x=\pi-\sin\pi=\pi\), \(y=1-\cos\pi=2\) &mdash; the top of the first arch. At \(t=2\pi\): \(x=2\pi\), \(y=0\) &mdash; back down to the line. The pattern then repeats for \(t\in[2\pi,4\pi]\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Two identical arches, each rising from the \(x\)-axis to a height of \(2\) and back down, side by side &mdash; exactly the path a reflector on a rolling bicycle wheel traces as the wheel completes two full turns.</p>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Exploring Cycloids and Lissajous Curves</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), type <strong>(t - sin(t), 1 - cos(t))</strong>. Accept the \(t\)-slider Desmos offers, then set its range to \(0\) to \(4\pi\) to see two full arches, matching Example 5. Press play and watch the traced point move exactly the way a valve stem on a rolling bicycle wheel would. Then, on a new line, type <strong>(sin(3t), sin(2t))</strong> with \(t\) ranging over \(0\) to \(2\pi\), and observe the woven, ribbon-like Lissajous curve that results. Change the \(3\) to a \(4\) or a \(5\) and watch the pattern reorganize itself completely &mdash; a direct, visual way to explore how the frequency ratio controls the shape.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Eliminate the parameter from \(x=t\), \(y=t^2+3\), \(t\) any real number.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(t=x\), so \(y=x^2+3\), with no restriction (\(t\) covers every real number, so \(x\) does too).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Eliminate the parameter from \(x=t^2\), \(y=t-1\), \(t\ge0\), stating the restriction and checking one point.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            From \(y=t-1\), \(t=y+1\); since \(t\ge0\), \(y\ge-1\). Substituting into \(x=t^2\): \(x=(y+1)^2\), with \(y\ge-1\). Check: at \(t=3\), \(x=9,y=2\); rectangular gives \(x=(2+1)^2=9\). &#10003;
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Eliminating the parameter correctly, then forgetting to check whether a square root, an even power, or a restricted \(t\)-range silently narrowed the domain or range. Example 2's algebra is fully correct without the restriction &mdash; \(y=2x^2+1\) is exactly the right shape of curve &mdash; but without \(x\ge0\) stated explicitly, the equation describes twice as much curve as the original parametrization ever draws. Always test at least one point from the original parametric equations against the final rectangular form, exactly as Examples 2 and 4 did, before calling the elimination finished.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">In 1673, the Dutch physicist Christiaan Huygens discovered that a pendulum swinging along a cycloidal path is <em>tautochronous</em>: it takes exactly the same time to complete a swing no matter how wide the swing is, a property no ordinary circular-arc pendulum has. Huygens built cycloidal-cheek pendulum clocks to try to exploit it. Then, in 1696, Johann Bernoulli publicly challenged Europe's mathematicians to find the curve of <em>fastest</em> descent between two points under gravity &mdash; the brachistochrone problem. Newton, Leibniz, l'H&ocirc;pital, and Johann's own brother Jacob Bernoulli each found the answer independently: the fastest path is not a straight line at all, but again a cycloid. The same humble curve traced by a point on a rolling wheel turned out to govern both perfectly equal time and least possible time &mdash; a coincidence too strange for the Bernoulli brothers to let go of, and part of why this unit's Bernoulli connection runs as deep as it does.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Eliminating the parameter closes the loop this week opened: a moving point's story, translated back into the single equation this course has used since Unit 1 &mdash; with one honest caveat, that a restriction hiding inside the original parametrization must travel with it, or the translation quietly says more than the truth. The cycloid and the Lissajous curve are exactly the kind of shape a parametrization was built to reach that a rectangular equation, on its own, would never have thought to write down. Unit 8 closes here with three languages now in hand for describing a curve &mdash; rectangular, polar, and parametric &mdash; each one true, and each one showing you something the other two do not.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why can eliminating the parameter produce a technically correct equation that still describes the wrong set of points?</p>
+    <p>2. What kind of information does a parametric curve carry that its eliminated rectangular equation cannot?</p>
+    <p>3. Why is a point check &mdash; substituting an actual value of \(t\) &mdash; the most reliable way to confirm a domain restriction was carried forward correctly?</p>
+    <p>4. What does it mean that the very same cycloid answers two different questions &mdash; equal time for every swing, and fastest possible descent &mdash; and why might that feel like more than a coincidence?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">8-8 &middot; Eliminating the Parameter; Parametric Graphs with Technology</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

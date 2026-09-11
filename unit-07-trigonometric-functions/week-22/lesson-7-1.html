@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 7-1</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 7</div>
+        <div style="font-size: 13px; color: #666;">Trigonometric Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">7-1</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Trigonometric Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">7-1</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Graphs of Sine and Cosine</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to build the graphs of \(y=\sin x\) and \(y=\cos x\) directly from the unit circle, letting the horizontal axis track the angle \(\theta\) and the vertical axis track the coordinate that angle produces.</p></li>
+        <li><p>I will be able to identify the period, midline, and amplitude of \(y=\sin x\) and \(y=\cos x\) and state each as a specific number.</p></li>
+        <li><p>I will be able to use the periodicity of sine and cosine to evaluate either function at an angle outside \([0,2\pi)\), by reducing it to an equivalent angle within one cycle.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Sinusoidal function</strong>: any function whose graph carries the same wave shape as sine or cosine &mdash; a smooth rise to a maximum, a smooth fall through a resting height to a minimum, and then an exact repeat.</p>
+    <p><strong>Period</strong>: the horizontal length of one complete cycle &mdash; the smallest positive number \(p\) for which \(f(x+p) = f(x)\) holds for every \(x\).</p>
+    <p><strong>Amplitude</strong>: half the distance between a sinusoidal function's maximum and minimum values &mdash; how far the wave reaches above (and below) its midline.</p>
+    <p><strong>Midline</strong>: the horizontal line exactly halfway between a sinusoidal function's maximum and minimum values &mdash; the height the wave is built around.</p>
+    <p><strong>Cycle</strong>: one complete repetition of a periodic function's pattern, after which the graph begins retracing itself identically.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>In 1822, the French mathematician <strong>Joseph Fourier</strong> made a claim that startled the mathematicians of his day: almost any periodic process in nature &mdash; however jagged or irregular it first looks &mdash; can be built by adding together enough sine waves of different sizes and speeds. He was working on how heat spreads through a metal ring, not on trigonometry as such, but the tool he reached for was the very wave you are about to graph today. Almost seventeen centuries earlier, Ptolemy of Alexandria had already been quietly leaning on a cousin of that same tool: a theorem about circles and chords &mdash; what we now call <strong>Ptolemy's theorem</strong> &mdash; that hides inside it exactly the sum formulas you will meet later this unit, formulas for the sine and cosine of a combined angle. Neither the tides a harbor master times to the minute, nor the wheeling of the stars across a night sky that older astronomers called a &ldquo;clockwork,&rdquo; obey a whim. They obey a <em>period</em> &mdash; a fixed, disciplined interval after which the whole pattern repeats exactly. That is this unit's virtue in its purest mathematical form: <strong>self-government</strong> is not being told what to do by something outside yourself; it is keeping your own law so reliably that someone else could set a clock by you. Today, sine and cosine put that discipline on display as a graph for the very first time.</p>
+
+    <p>Unit 6 relocated sine and cosine from a triangle's two acute angles onto the unit circle, defining \(P(\theta) = (\cos\theta, \sin\theta)\) for <em>every</em> real number \(\theta\). That single move is what makes today possible. A triangle has no graph worth drawing &mdash; its angle is stuck between \(0\) and \(90^\circ\). A circle, wound around forever, has an angle that keeps going, and a coordinate that keeps changing as it goes. Today you stop reading that coordinate off a circle and start reading it off a graph instead.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Unrolling the Circle: From Rotation to Wave</strong></h4>
+        <p>Picture the unit circle's circumference cut at the point \((1,0)\) and unrolled into a straight number line, with each point on that line labeled by the angle \(\theta\) it took to reach that spot walking counterclockwise from \((1,0)\). Now, above every labeled point on that unrolled line, plot the <em>height</em> \(\sin\theta\) that the terminal point had back when it was still on the circle. As \(\theta\) increases from \(0\), the height starts at \(0\), climbs to its greatest possible value of \(1\) at \(\theta = \frac{\pi}{2}\) (the top of the circle), falls back through \(0\) at \(\theta = \pi\), drops to its least value of \(-1\) at \(\theta = \frac{3\pi}{2}\) (the bottom of the circle), and returns to \(0\) at \(\theta = 2\pi\) &mdash; exactly one full lap. Unroll the circle far enough in either direction and the same rise-and-fall pattern repeats without end, because winding another full \(2\pi\) around the circle always returns the terminal point to where it started. That unrolling <em>is</em> the graph of \(y = \sin x\). Doing the same with the \(x\)-coordinate, \(\cos\theta\), produces \(y=\cos x\) &mdash; identical in shape, just started a quarter-turn earlier.</p>
+    </div>
+
+    <p>A table makes the unrolling concrete. Using the exact values Unit 6 already established:</p>
+    <p style="text-align: center;">\(\theta:\ 0,\ \tfrac{\pi}{6},\ \tfrac{\pi}{4},\ \tfrac{\pi}{3},\ \tfrac{\pi}{2},\ \tfrac{2\pi}{3},\ \tfrac{3\pi}{4},\ \tfrac{5\pi}{6},\ \pi\)</p>
+    <p style="text-align: center;">\(\sin\theta:\ 0,\ \tfrac{1}{2},\ \tfrac{\sqrt2}{2},\ \tfrac{\sqrt3}{2},\ 1,\ \tfrac{\sqrt3}{2},\ \tfrac{\sqrt2}{2},\ \tfrac{1}{2},\ 0\)</p>
+    <p>Plot those nine pairs \((\theta, \sin\theta)\) and the shape is unmistakable: a smooth rise from \(0\) to a peak of \(1\) at \(\frac{\pi}{2}\), then a smooth, mirror-image fall back to \(0\) at \(\pi\) &mdash; and the same numbers, in the same order, describe the second half of the wave falling to \(-1\) and climbing back. Cosine's table over the same nine angles &mdash; \(1,\ \tfrac{\sqrt3}{2},\ \tfrac{\sqrt2}{2},\ \tfrac{1}{2},\ 0,\ -\tfrac{1}{2},\ -\tfrac{\sqrt2}{2},\ -\tfrac{\sqrt3}{2},\ -1\) &mdash; is the identical wave, simply starting at its peak instead of at its midline.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Parent Sine and Cosine Graphs</strong></h4>
+        <p>For both \(y = \sin x\) and \(y = \cos x\):</p>
+        <p style="text-align: center;">Period \(= 2\pi \qquad\) Amplitude \(= 1 \qquad\) Midline: \(y = 0\)</p>
+        <p style="margin-bottom: 0;">Domain: all real numbers (the circle never runs out of angle to accept). Range: \([-1,1]\) (the Pythagorean identity \(\cos^2\theta + \sin^2\theta = 1\) forbids either coordinate from ever leaving that interval). The only structural difference between the two graphs is a horizontal slide of \(\frac{\pi}{2}\): \(\cos x\) is \(\sin x\) shifted \(\frac{\pi}{2}\) units to the left, because reaching a cosine value of \(1\) at \(\theta=0\) is the same terminal point as reaching a sine value of \(1\) a quarter-turn later, at \(\theta = \frac{\pi}{2}\).</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Using the table above, sketch one full period of \(y = \sin x\) on \([0, 2\pi]\) and label its maximum, minimum, and every \(x\)-intercept.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The nine plotted points from \(0\) to \(\pi\) trace the wave's rise and fall across the top half of its cycle. The bottom half, from \(\pi\) to \(2\pi\), is the mirror image below the midline: \(\sin\left(\pi + \frac{\pi}{6}\right) = -\frac{1}{2}\), \(\sin\left(\frac{3\pi}{2}\right) = -1\), and so on, by the same quadrant reasoning Unit 6 established.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Maximum \(1\) at \(x=\frac{\pi}{2}\); minimum \(-1\) at \(x=\frac{3\pi}{2}\); \(x\)-intercepts at \(x = 0,\ \pi,\ 2\pi\). The curve crosses its midline exactly at the quadrantal angles where the circle crosses the \(x\)-axis.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Sketch one full period of \(y = \cos x\) on \([0, 2\pi]\) and label its maximum, minimum, and every \(x\)-intercept.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Cosine starts at its peak: \(\cos 0 = 1\). It falls to \(0\) at \(\frac{\pi}{2}\), to its minimum \(-1\) at \(\pi\), back to \(0\) at \(\frac{3\pi}{2}\), and returns to its peak of \(1\) at \(2\pi\) &mdash; the same wave as sine's, simply read starting a quarter-cycle earlier.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Maximum \(1\) at \(x=0\) and \(x=2\pi\); minimum \(-1\) at \(x=\pi\); \(x\)-intercepts at \(x=\frac{\pi}{2},\ \frac{3\pi}{2}\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Evaluate \(\sin\dfrac{13\pi}{6}\) using periodicity.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Subtract one full lap (\(2\pi = \frac{12\pi}{6}\)) to land inside \([0,2\pi)\):</p>
+    <p style="text-align: center;">\(\dfrac{13\pi}{6} - \dfrac{12\pi}{6} = \dfrac{\pi}{6}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\sin\dfrac{13\pi}{6} = \sin\dfrac{\pi}{6} = \dfrac{1}{2}\). Winding an extra full circle changes nothing about where the terminal point lands &mdash; the graph simply repeats the identical rise it made the first time through.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Evaluate \(\cos\dfrac{9\pi}{4}\) using periodicity.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(\dfrac{9\pi}{4} - 2\pi = \dfrac{9\pi}{4} - \dfrac{8\pi}{4} = \dfrac{\pi}{4}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\cos\dfrac{9\pi}{4} = \cos\dfrac{\pi}{4} = \dfrac{\sqrt2}{2}\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Sketch \(y = 2\sin x\) and compare it to \(y = \sin x\). What changes, and what stays the same?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Every output of \(\sin x\) is doubled: at \(x = \frac{\pi}{2}\), \(2\sin\frac{\pi}{2} = 2(1) = 2\); at \(x = \frac{3\pi}{2}\), \(2\sin\frac{3\pi}{2} = 2(-1) = -2\). The wave now reaches up to \(2\) and down to \(-2\) instead of \(1\) and \(-1\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The amplitude changes from \(1\) to \(2\); the period (still \(2\pi\)) and the midline (still \(y=0\)) do not change at all &mdash; the wave still completes exactly one lap every \(2\pi\) units and still rests on the same line. Notice what this means: amplitude answers <em>how far</em> the wave reaches, a completely separate question from <em>how often</em> it repeats. Tomorrow's lesson gives that separation a name.</p>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Watching the Wave Unroll</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), type <strong>y = sin(x)</strong> and <strong>y = cos(x)</strong> on separate lines. Set the graph settings (the wrench icon) so the \(x\)-axis is scaled in multiples of \(\pi\) &mdash; Desmos accepts <strong>pi</strong> directly in the step field. Trace along each curve and confirm, point by point, that Desmos reports the same values this lesson's table predicted: a maximum of \(1\), a minimum of \(-1\), and a return to \(0\) every time \(x\) advances by \(2\pi\). Then add a third line, <strong>y = sin(x + 2*pi)</strong>, and watch it draw <em>exactly on top of</em> \(y=\sin x\) &mdash; a direct visual proof that adding one full period changes nothing.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Evaluate \(\sin\frac{16\pi}{3}\) by first reducing it to an equivalent angle in \([0, 2\pi)\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\frac{16\pi}{3} - 2\pi = \frac{16\pi}{3} - \frac{6\pi}{3} = \frac{10\pi}{3}\), which is still more than \(2\pi = \frac{6\pi}{3}\); subtract once more: \(\frac{10\pi}{3} - \frac{6\pi}{3} = \frac{4\pi}{3}\). So \(\sin\frac{16\pi}{3} = \sin\frac{4\pi}{3}\). Since \(\frac{4\pi}{3} = \pi + \frac{\pi}{3}\) is in Quadrant III (sine negative), \(\sin\frac{4\pi}{3} = -\sin\frac{\pi}{3} = -\frac{\sqrt3}{2}\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: State the amplitude, period, and midline of \(y = 5\cos x\), and explain in one sentence why the period is unaffected by the \(5\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Amplitude \(5\); period \(2\pi\); midline \(y=0\). Multiplying every output by \(5\) stretches the wave vertically &mdash; how far it reaches &mdash; but it does not touch the input \(x\) at all, so the circle still completes one full lap, and the graph still repeats, every \(2\pi\) units exactly as before.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Assuming sine and cosine graphs "run out" past \(x=2\pi\) or below \(x=0\), the way a triangle's angle runs out past \(90^\circ\). They do not &mdash; the unit circle keeps turning in both directions forever, so \(y=\sin x\) and \(y=\cos x\) are defined, and keep repeating, for every real number \(x\), positive or negative, large or small. A closely related slip: forgetting that periodicity works in <em>either</em> direction. \(\sin\left(-\frac{\pi}{6}\right)\) is not "off the graph" &mdash; it is simply \(-\frac{1}{2}\), one step backward from \(x=0\) along a wave that extends without end.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Fourier's claim &mdash; that a periodic pattern can be built from summed sine waves &mdash; was made mechanical fifty years later. In 1872, the physicist Lord Kelvin (William Thomson) built a <strong>tide-predicting machine</strong>: a cabinet of pulleys, gears, and wires, each wheel turning at the exact rate of one real tidal rhythm and contributing one sine wave to a pen tracing paper. Add enough wheels, each turning at its own disciplined, unwavering period, and the sum on the paper matched a harbor's actual tides for months in advance &mdash; a room-sized machine computing Fourier's insight before a single electronic computer existed.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Unit 6 ended by promising that the \((\cos\theta,\sin\theta)\) coordinates you generated by hand were about to become something new. Today they did: unrolled off the circle and plotted against the angle that produced them, those same coordinates draw the sine and cosine waves you have now graphed, evaluated, and traced on the calculator. Every one of Unit 6's tools &mdash; the exact values, the periodicity, the quadrant signs &mdash; still lives inside this graph; nothing was thrown away, only re-displayed. What you have <em>not</em> yet done is change the wave's shape on purpose. Tomorrow, three new numbers &mdash; a stretch, a squeeze, and a slide &mdash; let you dial a sine wave to match a real Ferris wheel, a real voltage, a real tide, instead of only the plain unit-circle version you built today.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What does it mean, precisely, to "unroll" the unit circle into the graph of \(y=\sin x\), and why does that process never run out of circle to unroll?</p>
+    <p>2. Why are the graphs of \(y=\sin x\) and \(y=\cos x\) identical in shape, differing only by a horizontal slide of \(\frac{\pi}{2}\)?</p>
+    <p>3. In what sense is a periodic wave's exact, unfailing return to itself every \(2\pi\) units an act of self-government rather than an accident?</p>
+    <p>4. How does periodicity let you evaluate sine or cosine at an angle far outside \([0,2\pi)\) without ever leaving the one cycle you already know?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">7-1 &middot; Graphs of Sine and Cosine</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

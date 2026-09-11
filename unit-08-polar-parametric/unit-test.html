@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Unit 08 Test</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 8</div>
+        <div style="font-size: 13px; color: #666;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Assessment</div>
+        <div style="font-size: 18px; color: #0e1c42;">Unit 8 Test</div>
+        <div style="font-size: 13px; color: #666;">Covers Lessons 8-1 through 8-11</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Points</div>
+        <div style="font-size: 16px; color: #0e1c42;">Test &middot; Rubric-Graded</div>
+        <div style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 14px; padding: 3px 12px; border-radius: 10px; margin-top: 6px;">40 pts</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">Unit 8 &middot; Polar Coordinates &amp; Parametric Equations</div>
+        <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Unit Test: Polar Coordinates &amp; Parametric Equations</div>
+        <div style="font-size: 15px; color: #666;">Test &middot; 40 pts &middot; Hand-written, single PDF upload</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128203; BEFORE YOU BEGIN</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <p style="margin-top: 0;">This test gathers the whole unit into one sitting: polar-rectangular point and equation conversion, graphing circles, cardioids, limaçons, lemniscates, and rose curves, sketching and eliminating the parameter from parametric curves, and translating fluently among all three representations. It has three parts: <strong>Part A</strong> (fluency), <strong>Part B</strong> (reasoning &mdash; write these as arguments), and <strong>Part C</strong> (one synthesis problem connecting this unit to Unit 7).</p>
+            <p><strong>Ground rules.</strong> Set aside a quiet block of about 90 minutes and complete the test in one honest sitting. Work alone: no classmates, no AI tools, no solution websites &mdash; this is the one place where the mathematics must be entirely yours. A calculator may be used for <em>arithmetic only</em> (evaluating a decimal, checking a computation); every setup, classification, general-solution reasoning, and step of written argument must appear on your page &mdash; the calculator may check a number, never supply the reasoning. Lesson pages and notes stay closed.</p>
+            <p style="margin-bottom: 0;">Write the honor line at the top of your first page and sign it: <em>&ldquo;I completed this test on my own, without help from people, notes, or AI tools.&rdquo;</em> Intellectual honesty is a quarter of the rubric &mdash; and in the unit whose virtue is wonder, honest work is what keeps wonder from curdling into shortcuts.</p>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #0E1C42;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; PART A &mdash; FLUENCY (Lessons 8-1 through 8-8, 8-11)</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">Neat vertical work for every problem &mdash; one step per line, exact values kept exact, labeled answers.</p>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">1</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Point conversion:</strong> &#9312; Convert the polar point \(\left(3,\dfrac{2\pi}{3}\right)\) to rectangular coordinates, exact values. &#9313; Convert the rectangular point \((-2,2\sqrt3)\) to polar coordinates, with \(r>0\) and \(0\le\theta<2\pi\).</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">2</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Negative \(r\):</strong> Plot the point \(\left(-2,\dfrac{\pi}{4}\right)\) by finding its equivalent positive-\(r\) form, then convert to rectangular coordinates. Show both the negative-\(r\) reasoning and the final point.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">3</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Equation conversion, both directions:</strong> &#9312; Convert the rectangular equation \(x^2+y^2=6y\) to polar form. &#9313; Convert the polar equation \(r=4\cos\theta\) to rectangular form, and identify the circle's center and radius.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">4</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Cardioid:</strong> For \(r=2-2\sin\theta\), state the maximum value of \(r\) and the \(\theta\) at which it occurs, state the value of \(\theta\) at which the curve touches the pole, and name the curve's axis of symmetry.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">5</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Limaçon classification:</strong> Classify \(r=4+2\cos\theta\) (inner loop, cardioid, dimpled, or convex), showing the ratio test you used, and state its maximum and minimum \(r\)-values.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">6</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Lemniscate:</strong> For \(r^2=9\sin(2\theta)\), state the number of petals, and state the condition on \(\theta\) that must hold for \(r\) to be a real number at all.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">7</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Rose curve:</strong> For \(r=2\cos(3\theta)\), state the number of petals and the reasoning (parity of \(n\)) that determines it, and state the maximum length of each petal.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">8</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Parametric sketch and elimination:</strong> For \(x=2t+1,\ y=t^2-3\): &#9312; complete a table for \(t=-1,0,1,2\) and note the direction of motion as \(t\) increases. &#9313; Eliminate the parameter to find the rectangular equation.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #0E1C42;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; PART B &mdash; REASONING (write these as arguments)</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">These problems are graded primarily on the quality of your reasoning. Full sentences where explanation is asked; every claim earned, not asserted.</p>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #0E1C42; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">9</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Classify and justify a limaçon.</strong> Consider \(r=3+2\sin\theta\). &#9312; Compute \(r\) at \(\theta=0,\ \frac{\pi}{2},\ \pi,\ \frac{3\pi}{2}\), and state the maximum and minimum values of \(r\). &#9313; Using the ratio of the constant term to the coefficient, classify this limaçon (inner loop, cardioid, dimpled, or convex), and explain in your own words what the ratio test is actually checking &mdash; what would have to be true of \(r\) for an inner loop to exist, and why your computed minimum in &#9312; rules that out here. &#9314; Sketch the general shape (described in words is acceptable: is it "pinched" anywhere, or smoothly convex?) and justify your description from your four computed points.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #0E1C42; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">10</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Convert a projectile model and interpret it.</strong> A ball's motion is modeled parametrically by \(x(t)=20t,\ y(t)=15t-4.9t^2\) (SI units, \(t\) in seconds). &#9312; Eliminate the parameter to find \(y\) as a function of \(x\), showing the substitution \(t=\frac{x}{20}\) explicitly. &#9313; Identify the shape of the resulting rectangular equation and state its concavity. &#9314; Find the ball's range (the positive \(x\)-intercept of your rectangular equation), and separately find the flight time directly from \(y(t)=0\); show that \(x(\text{flight time})\) equals the range you found in &#9313;. &#9315; In two or three sentences, explain why a rectangular equation, on its own, cannot tell you <em>when</em> the ball reaches any particular point on its path, even though it can tell you the path's exact shape.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #C7922C;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; PART C &mdash; SYNTHESIS (this unit meets Unit 7)</div>
+
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+            <div style="min-width: 26px; height: 26px; border-radius: 50%; background: #C7922C; color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">11</div>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Consider the limaçon \(r=1+2\sin\theta\).
+                <br />&#9312; <strong>Find every \(\theta\) in \([0,2\pi)\)</strong> at which the curve passes through the pole (\(r=0\)), using exactly the general-solution-then-restrict method Lesson 7-8 taught for solving trigonometric equations: set \(1+2\sin\theta=0\), solve for \(\sin\theta\), identify the reference angle, place both solutions by quadrant (citing which quadrants give a negative sine), write the general solution with \(+2\pi k\), and only then restrict to \([0,2\pi)\).
+                <br />&#9313; <strong>Interpret geometrically.</strong> In two or three sentences, explain what these two \(\theta\)-values represent on the curve itself &mdash; what does it mean, physically, for a polar curve to reach \(r=0\) at two different angles rather than just one?
+                <br />&#9314; <strong>Classify and cross-check.</strong> Using the ratio test from Part B, classify this limaçon (inner loop, cardioid, dimpled, or convex). Explain, in your own words, why a limaçon has an inner loop <em>if and only if</em> \(r=0\) has solutions at all &mdash; that is, why your answer to &#9312; finding two genuine solutions is itself evidence for your classification in &#9314;, not a separate, unrelated fact.
+                <br />&#9315; <strong>Name the connection.</strong> One or two sentences: which specific technique from Lesson 7-8 did you use in &#9312;, and why would simply reading "where the graph looks like it touches zero" off a sketch not have been sufficient without that algebraic technique?</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; overflow-x: auto;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128202; GRADING RUBRIC</div>
+        <p style="font-size: 15px; color: #666; font-style: italic;">The whole test is graded against the standing four-criterion rubric, each criterion scored out of 10. Part A supplies most of the evidence for understanding and precision; Parts B and C supply most of the evidence for reasoning.</p>
+        <table style="width: 100%; border-collapse: collapse; min-width: 580px;">
+            <thead>
+                <tr style="background: #0E1C42;">
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">Criteria</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: left; border: 1px solid #334;">What excellent looks like</th>
+                    <th style="padding: 10px 12px; font-size: 13px; color: #fff; text-align: center; border: 1px solid #334;">Pts</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="background: #FFFFFF;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; width: 220px; vertical-align: top;">Understanding of the material</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Polar&ndash;rectangular conversion, curve identification (cardioid, limaçon, lemniscate, rose), and parametric sketching/elimination all executed correctly and fluently, with notation exact throughout.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">10 pts</td>
+                </tr>
+                <tr style="background: #F4F6FA;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Quality of reasoning</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">The limaçon classification argument and the projectile interpretation both read as genuine arguments; the Part C connection to Lesson 7-8's general-solution method is made explicitly and correctly, not merely gestured at.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">10 pts</td>
+                </tr>
+                <tr style="background: #FFFFFF;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Presentation &amp; precision</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Clean vertical work throughout, aligned equals signs, exact values kept in radical or \(\pi\)-form where called for, pages in order &mdash; forty points of work a stranger could follow.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">10 pts</td>
+                </tr>
+                <tr style="background: #F4F6FA;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #0e1c42; border: 1px solid #D0D9E8; vertical-align: top;">Intellectual honesty</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; vertical-align: top;">Honor line signed and honored; work shown as actually done; any problem you could not finish carries an honest note of where and why you stopped &mdash; which earns respect here, never punishment.</td>
+                    <td style="padding: 10px 12px; font-size: 14px; color: #1a2340; border: 1px solid #D0D9E8; text-align: center; vertical-align: top;">10 pts</td>
+                </tr>
+                <tr style="background: #0E1C42;">
+                    <td style="padding: 10px 12px; font-size: 15px; color: #ffffff; border: 1px solid #55C8E8; text-align: right;" colspan="2">Total:</td>
+                    <td style="padding: 10px 12px; font-size: 16px; color: #55c8e8; border: 1px solid #55C8E8; text-align: center;">40 pts</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div style="background: #FDF3E3; border-left: 5px solid #C7922C; border-radius: 6px; padding: 18px 22px; margin-bottom: 24px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128228; SUBMISSION INSTRUCTIONS</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Canvas Assignment Name:</strong> Unit 8 Test &middot; Polar Coordinates &amp; Parametric Equations</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;">Complete the test by hand on paper, honor line first. When you finish, photograph or scan your pages, combine them into <strong>one PDF</strong> with the pages in order, and upload the single file here. Name the file <strong>LastName_FirstName_Precalculus_Unit8Test.pdf</strong>.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Due:</strong> This test occupies Thursday&rsquo;s lesson slot this week &mdash; see the Canvas due date. The flex day remains available afterward for rest and catch-up in other work.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">Three weeks ago the plane gained a second address system built from a distance and an angle. Since then you have plotted it, graphed cardioids and roses in it, traced curves through it one instant of time at a time, and learned to move fluently among every language it offers. Show all of that on these pages &mdash; and show, too, that a general trigonometric solution earned in one unit still holds its ground in another.</div>
+    </div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Polar Coordinates &amp; Parametric Equations</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">Unit 8 Test &middot; Polar Coordinates &amp; Parametric Equations</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

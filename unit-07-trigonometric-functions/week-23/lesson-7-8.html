@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 7-8</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 7</div>
+        <div style="font-size: 13px; color: #666;">Trigonometric Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">7-8</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Trigonometric Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">7-8</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Solving Trigonometric Equations</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to solve linear trigonometric equations exactly, both on a stated interval and in general form.</p></li>
+        <li><p>I will be able to solve quadratic-type trigonometric equations by substitution and factoring.</p></li>
+        <li><p>I will be able to use an identity to reduce an equation involving more than one trig expression into a solvable factored form.</p></li>
+        <li><p>I will be able to state a complete general solution using an arbitrary integer \(k\), and explain why sine/cosine equations need \(+2k\pi\) while tangent equations need only \(+k\pi\).</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Trigonometric equation</strong>: An equation in which the unknown angle appears inside a trigonometric function &mdash; \(\sin\theta = 1/2\), for instance, rather than \(x=1/2\). Because sine, cosine, and tangent are periodic, such an equation is rarely satisfied by a single number.</p>
+    <p><strong>Solution set on an interval</strong>: The complete, finite list of angles within a stated interval (most often \([0,2\pi)\), one full trip around the circle) that satisfy the equation.</p>
+    <p><strong>General solution</strong>: The complete, infinite family of every angle &mdash; on the whole real line, past and future revolutions alike &mdash; that satisfies the equation, written using an arbitrary integer \(k\): \(+2k\pi\) for sine and cosine (period \(2\pi\)), \(+k\pi\) for tangent and cotangent (period \(\pi\)).</p>
+    <p><strong>Quadratic-type trigonometric equation</strong>: An equation that becomes an ordinary quadratic once a trig function is treated as a single variable &mdash; substitute \(x=\cos\theta\) (or \(\sin\theta\), or \(\tan\theta\)) and the familiar factoring or quadratic-formula toolkit applies.</p>
+    <p><strong>Extraneous solution</strong>: A value produced by an algebraic step &mdash; squaring, or substituting an identity &mdash; that does not actually satisfy the original equation, and must be discarded by checking back against that original equation, not the intermediate one.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Long before any calendar existed to tell a farmer when to plant or a sailor when a tide would turn, the recurring positions of the sun, moon, and stars had to be predicted from pattern alone &mdash; and a prediction built on periodic motion is only as good as its accounting of <em>every</em> repetition, not merely the next one. An astronomer who solved "when will this eclipse configuration recur?" and stopped at the first answer would have handed a farmer or a sailor a single date and silently discarded every other true one buried in the same equation. That is exactly the discipline this lesson asks of you: a trigonometric equation, because sine, cosine, and tangent repeat forever, essentially never has one answer. It has a whole family of answers, and naming the <em>entire</em> family &mdash; not just the first one your calculator hands you &mdash; is this unit's self-government at its most literal: a repeating, disciplined pattern of solutions, and a mathematician disciplined enough to report all of it.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>On an Interval, or in General?</strong></h4>
+        <p>Every trig equation can be answered two ways, and a problem should always tell you which is wanted:</p>
+        <p><strong>On an interval</strong> (almost always \([0,2\pi)\), one full trip around the circle): list the finite set of angles in that interval that work.</p>
+        <p><strong>In general</strong>: describe <em>every</em> angle, on the whole real line, that works &mdash; past revolutions and future ones alike &mdash; using an arbitrary integer \(k\). Because sine and cosine repeat every \(2\pi\), their general solutions add \(+2k\pi\) to each interval answer. Tangent (and cotangent) repeat every \(\pi\) &mdash; a fact you can verify directly: \(\tan(\theta+\pi)=\tan\theta\) for every \(\theta\) where tangent is defined &mdash; so a tangent equation's general solution needs only \(+k\pi\), and that single family already contains both quadrant answers a \([0,2\pi)\) search would have found separately.</p>
+        <p style="margin-bottom: 0;">Skipping this distinction &mdash; reporting only the interval answer when "general" was asked, or forgetting the second family for a sine/cosine equation &mdash; is the single most common way a correct piece of algebra turns into an incomplete answer.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Solve \(2\sin\theta - 1 = 0\) on \([0,2\pi)\), then state the general solution.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Isolate the trig expression first, exactly as you would isolate \(x\):</p>
+    <p style="text-align: center;">\(2\sin\theta - 1 = 0 \;\;\Rightarrow\;\; \sin\theta = \dfrac{1}{2}\)</p>
+    <p>Sine is positive in Quadrants I and II, and the reference angle for \(\tfrac12\) is \(\pi/6\):</p>
+    <p style="text-align: center;">\(\theta = \dfrac{\pi}{6} \quad \text{or} \quad \theta = \pi - \dfrac{\pi}{6} = \dfrac{5\pi}{6}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> On \([0,2\pi)\): \(\theta = \dfrac{\pi}{6}, \dfrac{5\pi}{6}\). Because sine repeats every \(2\pi\), the general solution is \(\theta = \dfrac{\pi}{6} + 2k\pi\) or \(\theta = \dfrac{5\pi}{6} + 2k\pi\), for any integer \(k\) &mdash; two separate, infinite families, one seeded from each interval answer.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Solve \(2\cos^2\theta - \cos\theta - 1 = 0\) on \([0,2\pi)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>This is quadratic <em>in \(\cos\theta\)</em>. Substitute \(x = \cos\theta\):</p>
+    <p style="text-align: center;">\(2x^2 - x - 1 = 0\)</p>
+    <p>Factor &mdash; check by expanding before trusting it: \((2x+1)(x-1) = 2x^2 - 2x + x - 1 = 2x^2 - x - 1\), a match:</p>
+    <p style="text-align: center;">\((2x+1)(x-1) = 0 \;\;\Rightarrow\;\; x = -\dfrac{1}{2} \;\; \text{or} \;\; x = 1\)</p>
+    <p>Translate back to \(\theta\), one factor at a time. \(\cos\theta = 1\) has exactly one solution on \([0,2\pi)\): \(\theta = 0\). \(\cos\theta = -\tfrac12\) has reference angle \(\pi/3\) and is negative in Quadrants II and III: \(\theta = \tfrac{2\pi}{3}, \tfrac{4\pi}{3}\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The complete solution set on \([0,2\pi)\) is \(\left\{0, \dfrac{2\pi}{3}, \dfrac{4\pi}{3}\right\}\) &mdash; three solutions from a single quadratic, because the substitution \(x=\cos\theta\) hid a second layer of solutions (the quadrant pair) inside what looked like one root.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Solve \(\sin(2\theta) = \cos\theta\) on \([0,2\pi)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Two different angle arguments (\(2\theta\) and \(\theta\)) cannot be compared directly &mdash; rewrite the double angle first using \(\sin(2\theta) = 2\sin\theta\cos\theta\):</p>
+    <p style="text-align: center;">\(2\sin\theta\cos\theta = \cos\theta \;\;\Rightarrow\;\; 2\sin\theta\cos\theta - \cos\theta = 0 \;\;\Rightarrow\;\; \cos\theta\,(2\sin\theta - 1) = 0\)</p>
+    <p>A product is zero only if a factor is zero &mdash; never divide both sides by \(\cos\theta\) here, or you silently throw away every solution where \(\cos\theta = 0\).</p>
+    <p style="text-align: center;">\(\cos\theta = 0 \;\;\Rightarrow\;\; \theta = \dfrac{\pi}{2}, \dfrac{3\pi}{2} \qquad\qquad \sin\theta = \dfrac{1}{2} \;\;\Rightarrow\;\; \theta = \dfrac{\pi}{6}, \dfrac{5\pi}{6}\)</p>
+    <p><span style="color: #e62429;"><strong>Verify &mdash; in the ORIGINAL equation, not the factored one:</strong></span></p>
+    <p style="text-align: center;">\(\theta=\tfrac{\pi}{6}: \sin\tfrac{\pi}{3}=\tfrac{\sqrt3}{2},\; \cos\tfrac{\pi}{6}=\tfrac{\sqrt3}{2}\; \checkmark \qquad \theta=\tfrac{\pi}{2}: \sin\pi=0,\; \cos\tfrac{\pi}{2}=0\; \checkmark\)</p>
+    <p style="text-align: center;">\(\theta=\tfrac{5\pi}{6}: \sin\tfrac{5\pi}{3}=-\tfrac{\sqrt3}{2},\; \cos\tfrac{5\pi}{6}=-\tfrac{\sqrt3}{2}\; \checkmark \qquad \theta=\tfrac{3\pi}{2}: \sin(3\pi)=0,\; \cos\tfrac{3\pi}{2}=0\; \checkmark\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The complete solution set on \([0,2\pi)\) is \(\left\{\dfrac{\pi}{6}, \dfrac{\pi}{2}, \dfrac{5\pi}{6}, \dfrac{3\pi}{2}\right\}\). Notice that checking against the <em>original</em> equation, rather than stopping at the factored line \(\cos\theta(2\sin\theta-1)=0\), is what actually confirms the identity substitution was applied correctly &mdash; the factored form only proves consistency with itself.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Solve \(\tan\theta = -1\) in general form.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Reference angle \(\pi/4\); tangent is negative in Quadrants II and IV:</p>
+    <p style="text-align: center;">\(\theta = \pi - \dfrac{\pi}{4} = \dfrac{3\pi}{4} \qquad \text{or} \qquad \theta = 2\pi - \dfrac{\pi}{4} = \dfrac{7\pi}{4} \quad \text{(on } [0,2\pi))\)</p>
+    <p>But tangent's period is \(\pi\), not \(2\pi\) &mdash; so these two answers are not independent families; they are the <em>same</em> family, one \(\pi\) apart. Check directly: \(\dfrac{3\pi}{4} + \pi = \dfrac{7\pi}{4}\), exactly the QIV answer, recovered for free.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The general solution is the single family \(\theta = \dfrac{3\pi}{4} + k\pi\), for any integer \(k\) &mdash; writing \(+2k\pi\) here (as sine or cosine would require) would silently drop half of the true solutions, since it would skip right over \(\tfrac{7\pi}{4}\), \(\tfrac{11\pi}{4}\), and every other odd multiple of \(\pi\) added to \(\tfrac{3\pi}{4}\).</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#9989; The Verification Habit</strong></h4>
+        <p style="margin-bottom: 0;">Anytime an equation was changed along the way &mdash; an identity substituted, both sides squared, or a factor introduced &mdash; check every candidate solution against the <strong>original</strong> equation, not the rewritten one. The rewritten form only proves you followed your own algebra correctly; the original equation is the actual claim you set out to solve, and it is the only place an extraneous solution (or a solution silently dropped) will show itself. Example 3 above is the model: four candidates, four independent checks, against \(\sin(2\theta)=\cos\theta\) itself.</p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Two versions of the same failure of discipline: (1) finding one quadrant answer and stopping &mdash; reporting \(\theta=\tfrac{2\pi}{3}\) alone for \(\cos\theta=-\tfrac12\) and missing its Quadrant III partner \(\tfrac{4\pi}{3}\); and (2) writing \(+2k\pi\) on a <em>tangent</em> equation's general solution, which looks careful but actually reports each true solution twice under two different names while implying a period the function does not have. Both mistakes come from treating "a" solution as "the" solution &mdash; exactly the discipline this lesson is built to correct.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; ON YOUR CALCULATOR</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Desmos (<a href="https://www.desmos.com/calculator">desmos.com/calculator</a>) turns any equation into a zero-finding problem: move everything to one side and graph the result. For Example 3, graph <strong>y = sin(2x) - cos(x)</strong> in radian mode over \(0 \le x < 2\pi\) and look for the \(x\)-intercepts &mdash; you should see exactly four, at \(\tfrac{\pi}{6}\approx0.524\), \(\tfrac{\pi}{2}\approx1.571\), \(\tfrac{5\pi}{6}\approx2.618\), and \(\tfrac{3\pi}{2}\approx4.712\), matching the algebra exactly. This does not replace solving by hand &mdash; a graph cannot hand you an exact value like \(\pi/6\) &mdash; but it is a fast, reliable check that you have found every solution and none you shouldn't have.</div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve \(2\cos\theta + 1 = 0\) on \([0,2\pi)\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\cos\theta = -\tfrac12\); reference angle \(\pi/3\), cosine negative in QII and QIII: \(\theta = \dfrac{2\pi}{3}, \dfrac{4\pi}{3}\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Solve \(2\sin^2\theta + \sin\theta - 1 = 0\) on \([0,2\pi)\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Let \(x=\sin\theta\): \(2x^2+x-1=0 \Rightarrow (2x-1)(x+1)=0 \Rightarrow x=\tfrac12\) or \(x=-1\). \(\sin\theta=\tfrac12 \Rightarrow \theta=\tfrac{\pi}{6},\tfrac{5\pi}{6}\); \(\sin\theta=-1 \Rightarrow \theta=\tfrac{3\pi}{2}\). Solution set: \(\left\{\tfrac{\pi}{6}, \tfrac{5\pi}{6}, \tfrac{3\pi}{2}\right\}\).
+        </div>
+    </details>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Every move in this lesson &mdash; isolating a trig expression before anything else, substituting to reveal a hidden quadratic, using an identity to bring mismatched angles into agreement, and above all refusing to stop at the first solution &mdash; is about to be needed again, immediately. Next week, the Law of Sines and the Law of Cosines let you solve triangles that have no right angle at all, and solving <em>them</em> for an unknown angle produces exactly this same kind of equation: one that, given only a ratio or a squared length, is often satisfied by two genuinely different triangles rather than one. That situation even has its own name &mdash; the ambiguous case &mdash; and it is nothing more than this lesson's lesson wearing a triangle's clothing: don't stop at the first solution; find out how many there really are.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does a trigonometric equation generally have infinitely many solutions, and what does it mean to give a "complete" answer to one?</p>
+    <p>2. When is \(+2k\pi\) the correct way to generalize a solution, and when must \(+k\pi\) be used instead? Why does the difference trace back to each function's period?</p>
+    <p>3. Why must a candidate solution be checked against the <em>original</em> equation rather than an intermediate factored or identity-substituted form?</p>
+    <p>4. In what sense does naming a complete, disciplined solution set &mdash; rather than the first answer a calculator returns &mdash; count as an act of self-government?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">7-8 &middot; Solving Trigonometric Equations</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

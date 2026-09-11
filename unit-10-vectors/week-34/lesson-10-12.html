@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 10-12</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 10</div>
+        <div style="font-size: 13px; color: #666;">Vectors</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">10-12</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Vectors</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">10-12</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Angles Between Vectors and Orthogonality</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to find the angle between two vectors using \(\cos\theta=\dfrac{\mathbf{u}\cdot\mathbf{v}}{|\mathbf{u}||\mathbf{v}|}\).</p></li>
+        <li><p>I will be able to test whether two vectors are <strong>orthogonal</strong> by computing their dot product, and explain why \(\mathbf{u}\cdot\mathbf{v}=0\) is the correct test rather than a rough visual check.</p></li>
+        <li><p>I will be able to decompose a vector into components parallel and perpendicular to a second vector.</p></li>
+        <li><p>I will be able to evaluate an AI tool's claim about orthogonality by actually computing the dot product myself, rather than accepting the claim on its word.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Orthogonal vectors</strong>: two vectors whose angle is exactly \(90^\circ\) &mdash; equivalently, and much more useful for computation, two vectors whose dot product equals exactly \(0\).</p>
+    <p><strong>Component of \(\mathbf{v}\) parallel to \(\mathbf{u}\)</strong>: the piece of \(\mathbf{v}\) that points in the same (or exactly opposite) direction as \(\mathbf{u}\); the remainder, perpendicular to \(\mathbf{u}\), is the <strong>component of \(\mathbf{v}\) perpendicular to \(\mathbf{u}\)</strong>. Together they add back up to \(\mathbf{v}\) exactly.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday's derivation gave the dot product a job: \(\mathbf{u}\cdot\mathbf{v}=|\mathbf{u}||\mathbf{v}|\cos\theta\) turns a component computation into an angle. Today puts that formula to its two most important uses &mdash; finding the exact angle between any two vectors, and recognizing the single special case, \(\theta=90^\circ\), where entire branches of geometry and physics simplify dramatically because \(\cos90^\circ=0\).</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Finding the Angle Between Two Vectors</strong></h4>
+        <p style="text-align: center;">\(\theta = \cos^{-1}\!\left(\dfrac{\mathbf{u}\cdot\mathbf{v}}{|\mathbf{u}||\mathbf{v}|}\right)\)</p>
+        <p>Solve the angle formula for \(\theta\) directly: compute the dot product, divide by the product of the two magnitudes, and take the inverse cosine. Because \(0^\circ\le\theta\le180^\circ\) for the angle between two vectors, there is no ambiguity to resolve &mdash; unlike some inverse-trig situations from earlier units, this one always has a single correct answer in that range.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Find the angle between \(\mathbf{u}=(1,\sqrt3)\) and \(\mathbf{v}=(-1,\sqrt3)\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(\mathbf{u}\cdot\mathbf{v}=(1)(-1)+(\sqrt3)(\sqrt3)=-1+3=2\). \(|\mathbf{u}|=\sqrt{1+3}=2\), \(|\mathbf{v}|=\sqrt{1+3}=2\).</p>
+    <p style="text-align: center;">\(\cos\theta=\dfrac{2}{2\cdot2}=\dfrac12 \quad\Longrightarrow\quad \theta=\cos^{-1}\!\left(\dfrac12\right)=60^\circ\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\theta=60^\circ\). A clean answer like this is worth double-checking by sketch: both vectors have the same length (\(2\)) and sit symmetrically on either side of the \(y\)-axis, which is exactly the picture a \(60^\circ\) angle between them should produce.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Orthogonality Test</strong></h4>
+        <p style="margin-bottom: 0;">Two nonzero vectors \(\mathbf{u}\) and \(\mathbf{v}\) are <strong>orthogonal</strong> (perpendicular) exactly when \(\mathbf{u}\cdot\mathbf{v}=0\). This follows immediately from \(\mathbf{u}\cdot\mathbf{v}=|\mathbf{u}||\mathbf{v}|\cos\theta\): since \(|\mathbf{u}|\) and \(|\mathbf{v}|\) are never zero, the dot product vanishes only when \(\cos\theta=0\) &mdash; that is, only when \(\theta=90^\circ\). No angle needs to be computed at all; the dot product alone answers the question.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Determine whether \(\mathbf{u}=(2,3)\) and \(\mathbf{v}=(-3,2)\) are orthogonal.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(\mathbf{u}\cdot\mathbf{v}=(2)(-3)+(3)(2)=-6+6=0\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Yes, \(\mathbf{u}\) and \(\mathbf{v}\) are orthogonal, because their dot product is exactly \(0\). No angle, magnitude, or arccosine is even needed once the dot product itself comes out to zero.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 8px; padding: 16px 22px; margin: 16px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 10px;">&#129302; AI CHECKPOINT &mdash; FIND THE PLANTED ERROR</div>
+        <p style="font-size: 17px; color: #0E1C42; line-height: 1.6;">A student asked an AI tutor: <em>&ldquo;Are \(\mathbf{u}=(7,2)\) and \(\mathbf{v}=(4,-9)\) orthogonal?&rdquo;</em> The AI answered:</p>
+        <p style="font-size: 17px; color: #0E1C42; line-height: 1.6; font-style: italic; background: #FFFFFF; border: 1px solid #E4C7C2; border-radius: 6px; padding: 10px 14px;">&ldquo;Yes. \(\mathbf{u}\cdot\mathbf{v}=(7)(4)+(2)(-9)=28-18=0\), so the vectors are orthogonal.&rdquo;</p>
+        <p style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Recompute the AI's arithmetic yourself, one term at a time. Is its conclusion correct? If not, find the exact step where the arithmetic goes wrong, and state the correct dot product and what it actually tells you about the angle between \(\mathbf{u}\) and \(\mathbf{v}\).</p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; See the fix: what did the AI's answer get wrong?</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \((7)(4)=28\) and \((2)(-9)=-18\) are both correct &mdash; the AI's <em>setup</em> was right. The error is in the final subtraction: \(28-18=10\), not \(0\). Since \(\mathbf{u}\cdot\mathbf{v}=10\ne0\), the vectors are <strong>not</strong> orthogonal. (In fact, \(\cos\theta=\dfrac{10}{|\mathbf{u}||\mathbf{v}|}=\dfrac{10}{\sqrt{53}\cdot\sqrt{97}}\approx0.14\), so \(\theta\approx91.9^\circ\) &mdash; very close to perpendicular, which is likely exactly why the AI's slip felt so plausible. Being <em>close</em> to \(90^\circ\) is not the same as being <em>exactly</em> \(90^\circ\), and the dot-product test does not round.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">This is exactly the shape most AI arithmetic errors take: not a wildly wrong answer, but a single dropped sign or slipped subtraction buried inside an otherwise correct-looking setup. An AI tool that shows its work is easier to audit than one that doesn't &mdash; but &ldquo;shows its work&rdquo; only helps if you actually read every step instead of skimming to the conclusion.</div>
+    </div>
+
+    <p>Orthogonality also makes it possible to split any vector into two meaningful pieces relative to a second vector &mdash; one piece parallel to it, one piece perpendicular. This decomposition is the exact tool tomorrow's lesson names formally as a <strong>projection</strong>, but the dot product already gives you everything you need to build it today.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span> &mdash; Decomposing a Vector</h4>
+    <p>Let \(\mathbf{u}=(3,1)\) and \(\mathbf{v}=(4,2)\). Write \(\mathbf{v}\) as the sum of a component parallel to \(\mathbf{u}\) and a component perpendicular to \(\mathbf{u}\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The parallel component is a scalar multiple of \(\mathbf{u}\) itself, say \(k\mathbf{u}\), chosen so that \(\mathbf{v}-k\mathbf{u}\) is orthogonal to \(\mathbf{u}\) &mdash; that is, \((\mathbf{v}-k\mathbf{u})\cdot\mathbf{u}=0\). Expanding: \(\mathbf{v}\cdot\mathbf{u}-k(\mathbf{u}\cdot\mathbf{u})=0\), so \(k=\dfrac{\mathbf{u}\cdot\mathbf{v}}{\mathbf{u}\cdot\mathbf{u}}\).</p>
+    <p>\(\mathbf{u}\cdot\mathbf{v}=(3)(4)+(1)(2)=14\). \(\mathbf{u}\cdot\mathbf{u}=(3)(3)+(1)(1)=10\). So \(k=\dfrac{14}{10}=\dfrac75\).</p>
+    <p style="text-align: center;">Parallel component: \(k\mathbf{u} = \dfrac75(3,1) = \left(\dfrac{21}{5},\ \dfrac75\right) = (4.2,\ 1.4)\)</p>
+    <p style="text-align: center;">Perpendicular component: \(\mathbf{v}-k\mathbf{u} = (4,2)-(4.2,1.4) = (-0.2,\ 0.6)\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\mathbf{v} = (4.2,1.4) + (-0.2,0.6)\), where \((4.2,1.4)\) is parallel to \(\mathbf{u}\) and \((-0.2,0.6)\) is perpendicular to it. Check the perpendicular claim: \((-0.2,0.6)\cdot(3,1)=-0.6+0.6=0\). &#10003; And the two pieces do add back to \(\mathbf{v}\): \((4.2-0.2,\ 1.4+0.6)=(4,2)\). &#10003;</p>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Confirming Orthogonality Visually</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a>, plot Example 2's \(\mathbf{u}=(2,3)\) and \(\mathbf{v}=(-3,2)\) as segments from the origin, then use Desmos's angle-measurement tool to confirm the angle between them reads exactly \(90^\circ\). Do the same with the AI checkpoint's \(\mathbf{u}=(7,2)\) and \(\mathbf{v}=(4,-9)\) &mdash; you should see an angle just barely off from \(90^\circ\), a visual echo of why the AI's error was so easy to make and so important to catch anyway.</p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Are \(\mathbf{u}=(5,-2)\) and \(\mathbf{v}=(4,10)\) orthogonal?</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\mathbf{u}\cdot\mathbf{v}=(5)(4)+(-2)(10)=20-20=0\). Yes &mdash; the dot product is exactly \(0\), so \(\mathbf{u}\) and \(\mathbf{v}\) are orthogonal.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Deciding two vectors are &ldquo;basically perpendicular&rdquo; from a rough sketch, without computing the dot product at all. A pair of vectors can look extremely close to a right angle and still have a dot product of \(10\), \(2\), or any other nonzero number &mdash; exactly what happened in this lesson's AI checkpoint. Orthogonality is an exact condition (\(\mathbf{u}\cdot\mathbf{v}=0\)), never an eyeballed one.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>The dot product now does three jobs at once: it reports the angle between two vectors, it flags orthogonality the instant it equals zero, and it supplies exactly the tool needed to split one vector into a piece that follows a second vector and a piece that ignores it entirely. That last idea &mdash; decomposition into parallel and perpendicular pieces &mdash; is not a side note. Next week's Lesson 10-13 names the parallel piece a <strong>projection</strong> and puts it to work computing something entirely new: the physical concept of <em>work</em>, the amount of a force that actually acts along the direction of motion.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does the orthogonality test \(\mathbf{u}\cdot\mathbf{v}=0\) never need you to compute magnitudes or an angle at all?</p>
+    <p>2. In the AI checkpoint, exactly which arithmetic step failed, and why was the AI's setup &mdash; the two products it multiplied &mdash; entirely correct even though its conclusion was wrong?</p>
+    <p>3. In Example 3's decomposition, why must the perpendicular component always satisfy \((\mathbf{v}-k\mathbf{u})\cdot\mathbf{u}=0\) &mdash; what would it mean if it didn't?</p>
+    <p>4. Why is &ldquo;the vectors look about perpendicular&rdquo; never an acceptable substitute for computing \(\mathbf{u}\cdot\mathbf{v}\), even when a sketch is available?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">10-12 &middot; Angles Between Vectors and Orthogonality</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

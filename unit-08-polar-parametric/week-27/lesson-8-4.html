@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 8-4</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 8</div>
+        <div style="font-size: 13px; color: #666;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">8-4</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">8-4</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Circles and Cardioids</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to identify a circle in polar form (\(r=a\), \(r=2a\cos\theta\), or \(r=2a\sin\theta\)) and state its center and radius without building a table.</p></li>
+        <li><p>I will be able to identify a cardioid in polar form (\(r=a\pm a\cos\theta\) or \(r=a\pm a\sin\theta\)) and state the direction of its cusp and the location of its farthest point.</p></li>
+        <li><p>I will be able to distinguish a circle&rsquo;s polar signature from a cardioid&rsquo;s at a glance, without plotting either one.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Cardioid</strong>: a heart-shaped polar curve with a single sharp cusp at the pole; algebraically, \(r=a\pm a\cos\theta\) or \(r=a\pm a\sin\theta\).</p>
+    <p><strong>Cusp</strong>: the sharp point of a cardioid, located exactly at the pole, where \(r=0\).</p>
+    <p><strong>Equation signature</strong>: the distinguishing algebraic pattern of an equation that reveals its graph&rsquo;s family instantly, without plotting.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday&rsquo;s table-and-symmetry method is a promise every polar equation can trust: it will always, eventually, reveal the true shape of a curve, however unfamiliar. But a promise that always works is not the same as a promise that is always the fastest way to work &mdash; and two shapes turn up so often in this unit&rsquo;s equations that building a fresh table for each one, every time, would be a kind of willful slowness. Today those two shapes &mdash; the circle and the cardioid &mdash; earn a shortcut: an equation signature you can read on sight, the way a practiced reader recognizes a word without sounding out each letter.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Circle Signatures</strong></h4>
+        <p style="text-align: center;">\(r=a\) &nbsp;&nbsp;&mdash;&nbsp;&nbsp; \(r=2a\cos\theta\) &nbsp;&nbsp;&mdash;&nbsp;&nbsp; \(r=2a\sin\theta\)</p>
+        <p style="margin-bottom: 0;"><strong>\(r=a\)</strong> is a circle centered at the pole, radius \(|a|\) &mdash; every direction, same distance. <strong>\(r=2a\cos\theta\)</strong> is a circle of radius \(|a|\), centered at \((a,0)\), passing through the pole. <strong>\(r=2a\sin\theta\)</strong> is a circle of radius \(|a|\), centered at \((0,a)\), also passing through the pole. Notice what all three share: <em>no constant term is added to the cosine or sine term.</em> That absence is the signature&rsquo;s whole secret.</p>
+    </div>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Cardioid Signature</strong></h4>
+        <p style="text-align: center;">\(r=a+a\cos\theta \qquad r=a-a\cos\theta \qquad r=a+a\sin\theta \qquad r=a-a\sin\theta\)</p>
+        <p>A cardioid&rsquo;s signature is a constant term <em>added to</em> a cosine or sine term of the exact same size &mdash; &ldquo;\(a\) plus or minus that same \(a\).&rdquo; The cusp sits wherever \(r=0\); the farthest point from the pole, at distance \(2a\), sits at the opposite angle. For \(r=a+a\cos\theta\): \(r=0\) when \(\cos\theta=-1\) (\(\theta=\pi\)), so the cusp points left, and the curve reaches its farthest point, \(2a\), at \(\theta=0\) &mdash; the rounded bulge opens right, toward the polar axis.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Identify and describe \(r=6\cos\theta\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>No constant term &mdash; this is a circle. Here \(2a=6\), so \(a=3\). Verify by converting: multiply by \(r\), \(r^2=6r\cos\theta \Rightarrow x^2+y^2=6x \Rightarrow (x-3)^2+y^2=9\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Circle, center \((3,0)\), radius \(3\), passing through the pole.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Identify and describe \(r=-4\sin\theta\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>No constant term &mdash; a circle. Here \(2a=-4\), so \(a=-2\); center \((0,a)=(0,-2)\), radius \(|a|=2\). Verify: \(r^2=-4r\sin\theta \Rightarrow x^2+y^2=-4y \Rightarrow x^2+(y+2)^2=4\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Circle, center \((0,-2)\), radius \(2\), passing through the pole. A negative coefficient does not create a strange new shape; it only moves the circle's center to the opposite side of the pole.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Identify and describe \(r=3+3\cos\theta\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Constant term equals the coefficient of cosine (\(3\) and \(3\)) &mdash; a cardioid. Cusp where \(r=0\): \(3+3\cos\theta=0 \Rightarrow \cos\theta=-1 \Rightarrow \theta=\pi\). Farthest point: \(r=6\) at \(\theta=0\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Cardioid; cusp at the pole pointing toward \(\theta=\pi\) (left); farthest point \(6\) units out along the polar axis, symmetric about the polar axis (since cosine is even).</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Identify and describe \(r=5-5\sin\theta\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Constant equals the coefficient of sine &mdash; a cardioid. Cusp: \(5-5\sin\theta=0 \Rightarrow \sin\theta=1 \Rightarrow \theta=\frac{\pi}{2}\). Farthest point: at \(\theta=\frac{3\pi}{2}\), \(\sin\theta=-1\), so \(r=5-5(-1)=10\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Cardioid; cusp points up (\(\theta=\frac{\pi}{2}\)); farthest point \(10\) units straight down, at \(\theta=\frac{3\pi}{2}\). The cusp and the farthest point are always a half-turn (\(\pi\)) apart.</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Contrast \(r=4\cos\theta\) with \(r=4+4\cos\theta\): same coefficient, two entirely different curves. Find where each one crosses the polar axis in each direction.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(r=4\cos\theta\) (circle, no constant term): at \(\theta=0\), \(r=4\); at \(\theta=\pi\), \(r=4\cos\pi=-4\), which plots &mdash; by the negative-\(r\) rule &mdash; at distance \(4\) out along \(\theta=0\), the identical point. This circle touches the polar axis at exactly two points: the pole itself (\(\theta=\frac{\pi}{2}\)) and \((4,0)\).</p>
+    <p>\(r=4+4\cos\theta\) (cardioid): at \(\theta=0\), \(r=8\); at \(\theta=\pi\), \(r=0\), the pole.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The circle spans the polar axis from the pole to \((4,0)\) &mdash; a diameter of \(4\). The cardioid spans the polar axis from the pole to \((8,0)\) &mdash; a diameter of \(8\), twice as far, even though both equations share the number \(4\). One added constant term is the entire difference between these two spans.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: WHERE IS THE CUSP?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student asked an AI to locate the cusp of \(r=4+4\sin\theta\). It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;The cusp is at the top of the graph, at \(\theta=\frac{\pi}{2}\), because that is where the sine term is largest.&rdquo;</p>
+            <p>The AI confused two opposite features. A cusp occurs where \(r=0\), not where \(r\) is largest. Here, \(r=0\) when \(\sin\theta=-1\), at \(\theta=\frac{3\pi}{2}\) (pointing down) &mdash; and \(\theta=\frac{\pi}{2}\), where the sine term truly is largest, is where \(r=8\), the curve&rsquo;s <em>farthest</em> point from the pole, the rounded bulge, not the cusp.</p>
+            <p style="margin-bottom: 0;">Before trusting any claim about a cardioid&rsquo;s cusp &mdash; yours or a machine&rsquo;s &mdash; check which question you are actually answering: &ldquo;where does \(r\) equal zero&rdquo; (the cusp) is not the same question as &ldquo;where is \(r\) largest&rdquo; (the farthest point), and the two answers are always a half-turn apart.</p>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Reading a Signature Fast</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), type <strong>r = 4cos(theta)</strong> and, on the next line, <strong>r = 4 + 4cos(theta)</strong>. Desmos recognizes both as polar automatically. Watching the two graphs side by side &mdash; one circle through the pole, one cardioid, from equations that differ by a single added term &mdash; is the fastest way to make Example 5&rsquo;s contrast permanent. Then graph Example 4&rsquo;s cardioid and confirm by tracing that \(r=0\) exactly at \(\theta=\frac{\pi}{2}\), not at \(\theta=\frac{3\pi}{2}\) where the AI checkpoint above went wrong.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Identify \(r=10\sin\theta\), stating its center and radius.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            No constant term &mdash; a circle. \(2a=10 \Rightarrow a=5\). Center \((0,5)\), radius \(5\), passing through the pole.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Identify \(r=2-2\cos\theta\), stating the cusp&rsquo;s direction and the farthest point&rsquo;s distance.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Constant equals the coefficient &mdash; a cardioid. Cusp: \(2-2\cos\theta=0 \Rightarrow \cos\theta=1 \Rightarrow \theta=0\) (cusp points right). Farthest point at \(\theta=\pi\): \(r=2-2(-1)=4\).
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The cardioid&rsquo;s single-point cusp is more than a mathematical curiosity &mdash; a satellite dish&rsquo;s microphone pickup pattern, and certain studio microphones used for exactly this reason, are built to have a cardioid-shaped sensitivity: strongly &ldquo;heart-shaped&rdquo; toward the front, and nearly silent from directly behind. The engineers who name that pattern &ldquo;cardioid&rdquo; are reaching for the same curve, and the same word, that you graphed today.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Two families, two signatures, and neither one required a single plotted point: a circle&rsquo;s equation names a coefficient and nothing more; a cardioid&rsquo;s equation names a constant that exactly matches that coefficient. The whole difference between an off-center circle and a heart-shaped curve with a single sharp point turns out to live in one added term &mdash; a small algebraic fact carrying a large geometric consequence. The cardioid you met today was a balanced special case, its two constants forced to match exactly. Tomorrow, that balance is deliberately broken &mdash; letting the two constants differ opens the cardioid into an entire family of related curves, some looping back on themselves in a shape too delightful to spoil before you have earned it honestly, table cell by table cell.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. What distinguishes a circle&rsquo;s polar equation from a cardioid&rsquo;s, given how similar the two forms look at first glance?</p>
+    <p>2. Why does the value of \(\theta\) where \(r=0\) tell you exactly where a cardioid&rsquo;s cusp points, while the value where \(r\) is maximum tells you the opposite end of the curve?</p>
+    <p>3. How does converting \(r=2a\cos\theta\) back to rectangular form confirm, independently of the signature shortcut, that it truly is a circle passing through the pole?</p>
+    <p>4. Why is it faster &mdash; and just as reliable &mdash; to recognize an equation&rsquo;s family from its signature than to build a full table of values for it, as you did yesterday?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">8-4 &middot; Circles and Cardioids</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

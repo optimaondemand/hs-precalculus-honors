@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Applied Task</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 10</div>
+        <div style="font-size: 13px; color: #666;">Vectors</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Assignment Type</div>
+        <div style="font-size: 18px; color: #0e1c42;">Applied Modeling Task</div>
+        <div style="font-size: 13px; color: #666;">Excel &middot; Assigned in Week 34 &middot; Completion-Scored</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Points</div>
+        <div style="font-size: 16px; color: #0e1c42;">Assignment</div>
+        <div style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 14px; padding: 3px 12px; border-radius: 10px; margin-top: 6px;">10 pts</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">Unit 10 Applied Task</div>
+        <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Flight Plan</div>
+        <div style="font-size: 15px; color: #666;">Excel Modeling Task &middot; 10 pts</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128203; THE SCENARIO</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <p style="margin-top: 0;">Long before satellites could tell a pilot exactly where an airplane sat over the earth, dead reckoning was the only navigation there was: know your airspeed and the heading you intend to steer, know the wind aloft, and add the two as vectors to find out where you are actually going. Every piece of mathematics this unit has handed you &mdash; the parallelogram law Simon Stevin worked out for forces in the 1580s, the component method J. Willard Gibbs and Oliver Heaviside distilled out of Hamilton's quaternions two centuries later &mdash; was built, in part, to make this exact problem solvable without guesswork. Lesson 10-9 gave you the technique itself: an aircraft's own-velocity vector (its airspeed and the heading it is steered) plus the wind's velocity vector equals its ground-velocity vector &mdash; the speed and direction the aircraft actually travels over the earth. This unit's virtue, <strong>service</strong>, is not an afterthought bolted onto that mathematics; it is the whole reason the mathematics matters. A flight plan that gets the vector addition right is passengers who land where the pilot said they would, fuel reserves that were calculated honestly instead of hoped for, and a heading that tells the truth about where the wind is actually carrying the airplane.</p>
+            <p style="margin-bottom: 0;">Your task: plan a two-leg flight against wind forecasts you choose, build the vector-addition arithmetic as a <em>live</em> Excel worksheet &mdash; one that recomputes your ground speed and ground track the instant a wind number changes &mdash; and then write the paragraph a pilot would actually read before takeoff: the briefing.</p>
+        </div>
+    </div>
+
+    <div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 6px; padding: 16px 22px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 10px;">&#127919; FOCUS QUESTION</div>
+        <div style="font-size: 20px; color: #0e1c42; font-style: italic; line-height: 1.6;">If the wind forecast for one of your legs changed overnight &mdash; a tailwind becoming a headwind, or a crosswind reversing &mdash; what in your worksheet would have to change, what would stay exactly the same, and how would your spreadsheet prove it got the new answer right without you recomputing anything by hand?</div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; border-top: 3px solid #0E1C42;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 16px;">&#128221; THE TASK</div>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Part 1 &mdash; Get the flight on record.</strong> On a sheet named <strong>Data/Plan</strong>, invent a two-leg flight: two legs with genuinely different distances and different headings (real airports and a real route you look up are welcome, but an invented route is just as acceptable). For <strong>each leg</strong>, record in labeled cells: the distance (nautical miles), the aircraft's true airspeed &mdash; TAS &mdash; in knots, the heading the pilot intends to steer (in degrees, aviation convention: measured clockwise from north, 000&deg;&ndash;360&deg;), and a wind forecast &mdash; a wind speed in knots and a wind direction. <strong>Label your wind direction as the compass heading the wind is blowing <em>toward</em></strong> (for example, &ldquo;wind toward 200&deg; at 20 kt&rdquo; means the air is moving from the northeast toward the southwest) &mdash; this keeps your wind vector built exactly the same way as your airspeed vector. Real aviation forecasts (METARs, TAFs, winds-aloft charts) report the direction the wind blows <em>from</em>; if you pull a real forecast, add 180&deg; (mod 360&deg;) to its reported direction before you enter it, and label that conversion in a cell so a reader can check your honesty at a glance. Two different, clearly labeled forecasts &mdash; real or self-invented &mdash; one per leg.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Part 2 &mdash; Build the vector-addition model, live.</strong> On a sheet named <strong>Model</strong>, build the worksheet that turns each leg's airspeed vector and wind vector into a ground-velocity vector &mdash; entirely with formulas that recalculate the instant a wind cell changes. No hard-coded intermediate values anywhere: if you change a wind speed or wind direction on the Data/Plan sheet, every downstream cell on the Model sheet must update itself.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>The heading conversion, spelled out (a favorite place for sign errors).</strong> Aviation headings are measured clockwise from north; the angle convention you learned in trigonometry class is measured counterclockwise from due east. The two are related by \( \theta_{\text{math}} = 90^\circ - H_{\text{heading}} \) (add 360&deg; if the result is negative). You almost never need to make that conversion by hand, because it is already built into the pair of identities you should type straight into Excel:</p>
+        <ul style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <li><strong>East component</strong> = speed &times; sin(heading)</li>
+            <li><strong>North component</strong> = speed &times; cos(heading)</li>
+        </ul>
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;">Notice that sine pairs with East and cosine pairs with North here &mdash; the opposite of the standard math-class pairing (cosine with the horizontal axis, sine with the vertical). That swap is exactly the \(90^\circ - H\) relationship above, worked through the co-function identities \(\sin(90^\circ-H)=\cos H\) and \(\cos(90^\circ-H)=\sin H\). Mixing up which trig function goes with which axis is the single most common way a wind-triangle problem goes wrong &mdash; say the swap out loud to a partner before you build a single formula, the way you practiced it in Lesson 10-9.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;">For each leg, with TAS in column B, heading in column C, wind speed in column F, and wind direction (toward) in column G, build (row 2 shown; copy down for row 3):</p>
+        <ul style="font-size: 18px; color: #1a2340; line-height: 1.65;">
+            <li>Airspeed East, D2: <code>=B2*SIN(RADIANS(C2))</code> &nbsp;&middot;&nbsp; Airspeed North, E2: <code>=B2*COS(RADIANS(C2))</code></li>
+            <li>Wind East, H2: <code>=F2*SIN(RADIANS(G2))</code> &nbsp;&middot;&nbsp; Wind North, I2: <code>=F2*COS(RADIANS(G2))</code></li>
+            <li>Ground East (sum), J2: <code>=D2+H2</code> &nbsp;&middot;&nbsp; Ground North (sum), K2: <code>=E2+I2</code></li>
+            <li><strong>Ground speed</strong> (the magnitude of the ground-velocity vector), L2: <code>=SQRT(J2^2+K2^2)</code></li>
+            <li><strong>Ground track</strong> (the direction the aircraft actually travels, 0&deg;&ndash;360&deg;), M2: <code>=MOD(DEGREES(ATAN2(K2,J2)),360)</code> &mdash; Excel's <code>ATAN2(x,y)</code> wants the North component first and the East component second to hand back a heading in this clockwise-from-north convention, which is the reverse order from how you likely built <code>ATAN2</code> formulas in earlier units.</li>
+        </ul>
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Worked illustration (not your data &mdash; build your own two legs):</strong> TAS 150 kt, heading 065&deg;, wind toward 200&deg; at 20 kt, over a 220 nmi leg, resolves to a ground speed of <strong>136.6 kt</strong> on a ground track of <strong>070.9&deg;</strong> &mdash; an estimated time en route of about <strong>1 hr 37 min</strong>. Notice the wind has bent the airplane's actual path a few degrees north of the 065&deg; it is pointed, and slowed it down: a partial headwind. Confirm your own worksheet behaves the same way &mdash; a tailwind component should raise your ground speed above your TAS, a headwind component should lower it, and a crosswind component should bend your ground track away from your heading without changing your ground speed by much.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Part 3 &mdash; Write it up like a pilot.</strong> On a sheet named <strong>Answers</strong>, state each leg's ground speed and ground track in full sentences that cite your own Model-sheet cells by reference (for example: &ldquo;On Leg 1, cell L2 shows a ground speed of 136.6 kt, and cell M2 shows a ground track of 070.9&deg;, given a heading of 065&deg; and a 20 kt wind toward 200&deg;&rdquo;). Then write the <strong>pilot's briefing paragraph</strong> &mdash; four to six sentences, in plain, professional language an actual pilot could read before departure: each leg's heading, ground speed, ground track, and estimated time en route, plus one sentence naming what the wind is doing to the flight (helping, hurting, or pushing it off course) on each leg.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65;"><strong>Part 4 &mdash; Put your AI tutor to the test.</strong> Before you touch a single cell, describe one leg's numbers to your AI tutor and ask it to <strong>predict, without computing anything</strong>, how that leg's ground speed and ground track would change if the wind shifted &mdash; for instance, if a tailwind became a headwind, or a crosswind reversed direction. Record the AI's prediction on the Answers sheet, in its own words. Then actually change that leg's wind speed and/or wind direction cells on the Data/Plan sheet to the shifted values, let the Model sheet recalculate itself, and record the new ground speed and ground track it produces. Grade the AI's prediction against what the worksheet actually did &mdash; did it get the direction of the change right? The rough size of the change? Did it hedge, hallucinate a number it had no way of knowing, or reason soundly from the geometry? Write your verdict, defended with the actual before-and-after numbers, and sign it. Once you have recorded the comparison, <strong>revert the wind cells to your original forecast</strong> so the workbook you submit reflects your real flight plan.</p>
+
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 0;"><strong>Honors stretch (optional):</strong> So far your worksheet has solved the <em>forward</em> problem &mdash; given a heading, find where the wind actually takes you. Pilots more often need the problem run in reverse: given a wind, what heading do I steer to hold an <em>exact</em> desired ground track? This is the <strong>wind correction angle (WCA)</strong> problem, and it is solvable with the Law of Sines applied to the wind triangle: if \(\theta\) is the angle between the wind's <em>from</em>-direction and your desired ground track, then \(\sin(\text{WCA}) = \dfrac{V_w}{\text{TAS}}\sin\theta\). For example, to hold a ground track of due east (090&deg;) in a 150 kt airplane against a 30 kt wind from 070&deg;: here \(\theta = 090^\circ-070^\circ=20^\circ\), so \(\sin(\text{WCA}) = \frac{30}{150}\sin 20^\circ \approx 0.0684\), giving \(\text{WCA}\approx 3.9^\circ\). Because the wind is coming from the north side of the course, you correct <em>into</em> it, steering a heading of \(090^\circ - 3.9^\circ \approx 086^\circ\) &mdash; a few degrees north of the track you actually want, so the wind pushes you back onto it. Checking that heading the forward way (the same component method as Part 2) confirms it: TAS 150 kt at 086&deg; plus a 30 kt wind toward 250&deg; (070&deg; + 180&deg;) sums to a ground track of exactly 090.0&deg;, at a reduced ground speed of about 121.5 kt &mdash; the price this wind exacts for holding an exact course. Add a small block to your Model sheet that solves this reverse problem for one of your own legs: pick a desired ground track, and use the Law-of-Sines relation above (built as a live formula, not typed as a number) to find the heading you would actually have to steer, then verify it forward.</p>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128193; M365 REMINDER</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Work in Excel from your <strong>school Microsoft account</strong>. Name the workbook <strong>LastName_FirstName_FlightPlan_Precalculus.xlsx</strong> and save it to your <strong>Optima &rarr; Math &rarr; PrecalculusHonors</strong> folder in OneDrive before submitting.
+        <br /><span style="font-size: 15px; color: #1B6A94;"><em>M365 Skill You&rsquo;re Practicing: live, formula-driven vector decomposition and dependent-cell recalculation &mdash; changing one input cell and watching every downstream cell update itself (Excel &mdash; MOS Core).</em></span></div>
+    </div>
+
+    <div style="background: #EEF1F8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#9989; SUCCESS CRITERIA</div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">My workbook has the three required sheets (Data/Plan, Model, Answers); the Data/Plan sheet records two genuinely different legs, each with a distance, TAS, heading, and a clearly labeled wind speed and direction (labeled as the direction the wind blows toward, with any real forecast's "from" direction converted and shown).</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">The Model sheet decomposes both the airspeed vector and the wind vector into East/North components with live sine/cosine formulas, sums them into a ground-velocity vector, and recovers ground speed and ground track with live formulas &mdash; every cell is formula-driven, with no hard-coded intermediate numbers, so the whole sheet recalculates when a wind cell changes.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">The Answers sheet states each leg's ground speed and ground track in full sentences citing my own cells, and includes a four-to-six-sentence pilot's briefing paragraph covering headings, ground speeds, ground tracks, estimated times en route, and what the wind is doing on each leg.</div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;"><span style="color: #c7922c; font-size: 20px; flex-shrink: 0; line-height: 1.2;">&#9744;</span>
+            <div style="font-size: 18px; color: #1a2340; line-height: 1.6;">The AI round is complete and honest: the AI's un-computed prediction is recorded, the wind was actually changed and the worksheet's real recalculated result is recorded alongside it, and my signed verdict grades the AI against what actually happened &mdash; before the wind cells were reverted to my original forecast.</div>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128202; HOW THIS IS SCORED</div>
+        <p style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 0;"><strong>Completion-scored (10 pts):</strong> full credit for a working, formula-driven workbook built on your own two-leg flight and wind forecasts, meeting the success criteria. A worked model workbook is released after the due date &mdash; your route and winds will rightly differ from everyone else's, but your Model sheet's structure and your briefing's reasoning should hold up beside it. The four-criterion standard (understanding, reasoning, presentation, honesty) applies to your written answers exactly as it does on paper &mdash; and on this task, honesty includes labeling your wind convention correctly, letting the worksheet actually recalculate rather than typing in a second set of numbers by hand, and conceding wherever the AI's prediction turned out to be right.</p>
+    </div>
+
+    <div style="background: #FDF3E3; border-left: 5px solid #C7922C; border-radius: 6px; padding: 18px 22px; margin-bottom: 24px;">
+        <div style="font-size: 11px; color: #c7922c; margin-bottom: 12px;">&#128228; SUBMISSION INSTRUCTIONS</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Canvas Assignment Name:</strong> Unit 10 Applied Task &middot; Flight Plan</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;">Submit the Excel workbook itself (not a PDF) through Canvas using the <strong>OneDrive tab</strong> on the submission screen, so your live file comes through with its formulas intact.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65; margin-bottom: 10px;"><strong>Due:</strong> End of Week 34, ahead of the Unit 10 test in Week 35 &mdash; see the Canvas due date. Assigned alongside Lesson 10-9, which teaches the exact vector-addition technique this task asks you to build; the flex day this week is a natural time to build and test your worksheet.</div>
+        <div style="font-size: 18px; color: #1a2340; line-height: 1.65;">A pilot's flight plan is read by people who are trusting it with their safety: the headings are honest, the fuel math is honest, the wind forecast is labeled the way it was actually reported. You just built that same document &mdash; a spreadsheet where two vectors, added correctly and reported plainly, cooperate toward one resultant a pilot can actually fly by. That is service, worked out in trigonometry.</div>
+    </div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Vectors</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">Unit 10 Applied Task &middot; Flight Plan</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 8-5</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 8</div>
+        <div style="font-size: 13px; color: #666;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">8-5</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Polar Coordinates &amp; Parametric Equations</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">8-5</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Limaçons and Lemniscates</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to classify a limaçon \(r=a\pm b\cos\theta\) (or \(a \pm b\sin\theta\)) as having an inner loop, being a cardioid, being dimpled, or being convex, by reasoning from the ratio \(\dfrac{a}{b}\).</p></li>
+        <li><p>I will be able to graph a lemniscate \(r^2=a^2\cos2\theta\) (or \(a^2\sin2\theta\)), correctly identifying the angles where the curve is undefined and where its two loops cross the pole.</p></li>
+        <li><p>I will be able to build a short table of values and use symmetry to sketch a limaçon or lemniscate by hand, then confirm the sketch with a graphing calculator.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Limaçon</strong>: a polar curve of the form \(r=a\pm b\cos\theta\) or \(r=a\pm b\sin\theta\), whose shape &mdash; a loop, a dimple, or a smooth convex curve &mdash; is governed entirely by the ratio of \(a\) to \(b\). French for &ldquo;snail,&rdquo; after its coiled, shell-like sweep.</p>
+    <p><strong>Inner loop</strong>: a second, smaller loop that a limaçon draws inside its outer loop, produced whenever \(r\) becomes negative for some values of \(\theta\).</p>
+    <p><strong>Dimpled limaçon</strong>: a limaçon with a shallow indentation near the pole, but no full inner loop &mdash; \(r\) stays positive throughout, but dips close enough to the pole to pinch the curve inward on one side.</p>
+    <p><strong>Convex limaçon</strong>: a limaçon with no dimple and no loop at all &mdash; a smooth, egg-like curve that never indents.</p>
+    <p><strong>Lemniscate</strong>: a polar curve of the form \(r^2=a^2\cos2\theta\) or \(r^2=a^2\sin2\theta\), tracing a figure-eight through the pole. From the Latin \(\textit{lemniscatus}\), &ldquo;adorned with ribbons.&rdquo;</p>
+    <p><strong>Pole</strong>: the polar coordinate system's origin &mdash; the fixed point every value of \(r\) is measured from.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday's cardioid was a single, tidy special case: \(r=a\pm a\cos\theta\), the two constants forced into perfect balance. Loosen that balance &mdash; let \(a\) and \(b\) be any two positive numbers, equal or not &mdash; and the same family of equation opens onto a whole gallery of shapes: curves that swell into a smooth oval, curves that pinch into a shy little dimple, and curves that swallow themselves into a loop within a loop. The seventeenth-century French mathematician <strong>&Eacute;tienne Pascal</strong> &mdash; father of the more famous Blaise &mdash; was among the first to study this family closely, and his colleague <strong>Gilles de Roberval</strong> gave it the name it still carries: <em>limaçon</em>, French for &ldquo;snail,&rdquo; for the way its outer curve coils back on itself like a shell. What determines which snail you get &mdash; loop, dimple, or smooth curve &mdash; turns out to be nothing more exotic than a single ratio.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Limaçon Family: One Ratio, Four Shapes</strong></h4>
+        <p>For \(r = a \pm b\cos\theta\) or \(r = a \pm b\sin\theta\), with \(a,b>0\), the shape depends only on the ratio \(\dfrac{a}{b}\):</p>
+        <p style="text-align: center;">\(\dfrac{a}{b}<1\): inner loop &nbsp;&nbsp;&mdash;&nbsp;&nbsp; \(\dfrac{a}{b}=1\): cardioid &nbsp;&nbsp;&mdash;&nbsp;&nbsp; \(1<\dfrac{a}{b}<2\): dimpled limaçon &nbsp;&nbsp;&mdash;&nbsp;&nbsp; \(\dfrac{a}{b}\ge2\): convex limaçon</p>
+        <p>The reasoning behind the first boundary is direct: a limaçon draws an inner loop exactly when \(r\) can equal \(0\) or go negative for some \(\theta\) &mdash; that happens precisely when \(b>a\), since then \(a - b\cos\theta\) (say) can dip below zero as \(\cos\theta\) approaches \(1\). When \(a=b\), \(r\) touches \(0\) at exactly one angle without ever going negative &mdash; the cardioid's single sharp point. When \(a>b\), \(r\) never reaches \(0\) at all, and the curve stays a single, unbroken loop around the pole &mdash; smoothly dimpled if \(a\) is not too much larger than \(b\), fully convex once \(a\) is at least twice \(b\).</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Classify \(r=2+3\cos\theta\), and find the angles where the curve crosses the pole.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Here \(a=2\), \(b=3\), so \(\dfrac{a}{b}=\dfrac23<1\): an inner loop. Find where \(r=0\):</p>
+    <p style="text-align: center;">\(2+3\cos\theta=0 \;\Rightarrow\; \cos\theta=-\dfrac23 \;\Rightarrow\; \theta\approx131.8^\circ,\ 228.2^\circ\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Limaçon with an inner loop. Between \(\theta\approx131.8^\circ\) and \(\theta\approx228.2^\circ\), \(\cos\theta<-\frac23\), so \(r<0\) &mdash; those negative-\(r\) points plot on the opposite side of the pole from \(\theta\), and it is exactly this reflected stretch that draws the small loop nested inside the larger one.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Classify \(r=3+2\cos\theta\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Here \(a=3\), \(b=2\), so \(\dfrac{a}{b}=1.5\), which sits strictly between \(1\) and \(2\). Check that \(r\) never reaches \(0\): the smallest possible value of \(r\) occurs at \(\theta=\pi\), where \(\cos\theta=-1\), giving \(r=3-2=1>0\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Dimpled limaçon. Because \(r\) stays positive everywhere, there is no inner loop &mdash; but because \(a\) is not yet twice \(b\), the curve is not fully rounded either; it pinches into a shallow dimple near \(\theta=\pi\), where \(r\) is at its smallest.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Classify \(r=2+\cos\theta\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Here \(a=2\), \(b=1\), so \(\dfrac{a}{b}=2\) &mdash; exactly the boundary value.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Convex limaçon. At the boundary \(\frac{a}{b}=2\), the curve is exactly rounded, with no trace of a dimple remaining &mdash; any larger ratio only smooths the curve further into an ever-more circular oval.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Lemniscate</strong></h4>
+        <p>A lemniscate has the signature</p>
+        <p style="text-align: center;">\(r^2=a^2\cos2\theta \qquad \text{or} \qquad r^2=a^2\sin2\theta\)</p>
+        <p style="margin-bottom: 0;">Solving for \(r\) gives \(r=\pm a\sqrt{\cos2\theta}\) (or \(\pm a\sqrt{\sin2\theta}\)) &mdash; and because a square root of a negative number is not a real number, the curve is only defined where the expression under the root is nonnegative: \(\cos2\theta\ge0\) (respectively \(\sin2\theta\ge0\)). Outside those angles, the equation simply has no real points to plot &mdash; the curve does not exist there at all, rather than existing but being hard to see. The two \(\pm\) signs at each valid angle trace the curve's two lobes, meeting at the pole where \(r=0\).</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Graph \(r^2=4\cos2\theta\): find its domain, build a short table, and describe the resulting shape.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Here \(a^2=4\), so \(a=2\). The curve is defined only where \(\cos2\theta\ge0\), which happens for \(\theta\in\left[-\frac{\pi}{4},\frac{\pi}{4}\right]\) and \(\theta\in\left[\frac{3\pi}{4},\frac{5\pi}{4}\right]\) within one full turn. A short table over the first interval:</p>
+    <p style="text-align: center;">\(\theta=0:\ r^2=4\cos0=4 \Rightarrow r=\pm2 \qquad \theta=\tfrac{\pi}{8}:\ r^2=4\cos\tfrac{\pi}{4}\approx2.83 \Rightarrow r\approx\pm1.68 \qquad \theta=\tfrac{\pi}{4}:\ r^2=4\cos\tfrac{\pi}{2}=0 \Rightarrow r=0\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> A horizontal figure-eight lying along the polar axis: one loop swept out by \(\theta\in\left[-\frac{\pi}{4},\frac{\pi}{4}\right]\) on the right, and by symmetry a second loop for \(\theta\in\left[\frac{3\pi}{4},\frac{5\pi}{4}\right]\) on the left, the two loops meeting only at the pole. No points exist for \(\theta\) between \(\frac{\pi}{4}\) and \(\frac{3\pi}{4}\) (or their reflections) &mdash; the curve is simply absent from those directions.</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>For \(r^2=9\sin2\theta\), state the interval(s) of \(\theta\) (within \([0,2\pi)\)) where the curve is defined, without plotting points.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The curve requires \(\sin2\theta\ge0\). Over \(2\theta\in[0,4\pi)\), sine is nonnegative on \([0,\pi]\) and \([2\pi,3\pi]\). Dividing back by \(2\):</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\theta\in\left[0,\frac{\pi}{2}\right]\cup\left[\pi,\frac{3\pi}{2}\right]\). The two lobes of this lemniscate lie along the diagonal directions \(\theta=\frac{\pi}{4}\) and \(\theta=\frac{5\pi}{4}\) &mdash; the sine-based lemniscate is simply the cosine-based one from Example 4, rotated \(45^\circ\).</p>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Graphing in Polar Mode</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), type <strong>r = 2 + 3cos(theta)</strong> directly. Desmos recognizes an equation written in \(r\) and \(\theta\) (typed as <strong>theta</strong>) as a polar curve and plots it automatically &mdash; there is no separate mode to switch on. Open the graph settings (the wrench icon) to confirm the angle range runs from \(0\) to \(2\pi\), so the whole curve, including any inner loop, is drawn. Graph Example 1's limaçon and confirm by eye that the small inner loop appears between the two angles you calculated. Then graph <strong>r^2 = 4cos(2theta)</strong> for Example 4 &mdash; Desmos will plot both branches of the figure-eight and simply leave the undefined directions blank, exactly as the domain restriction predicted.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Classify \(r=1+4\sin\theta\), and state whether it has an inner loop.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(a=1\), \(b=4\), so \(\frac{a}{b}=\frac14<1\): a limaçon with an inner loop.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: For \(r^2=16\cos2\theta\), find \(a\) and state one value of \(\theta\) where \(r=0\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(a^2=16\), so \(a=4\). \(r=0\) when \(\cos2\theta=0\), e.g. \(2\theta=\frac{\pi}{2}\Rightarrow\theta=\frac{\pi}{4}\) (also \(\theta=\frac{3\pi}{4}\), and their reflections).
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Classifying a limaçon by comparing \(a\) and \(b\) as raw numbers instead of forming the ratio \(\frac{a}{b}\). \(r=10+9\cos\theta\) has a large gap between \(a=10\) and \(b=9\), which looks dramatic &mdash; but \(\frac{a}{b}=\frac{10}{9}\approx1.11\) is barely above \(1\), so the curve is only <em>slightly</em> dimpled, nearly a cardioid. Compare that to \(r=2+1.9\cos\theta\): the two constants are close together, yet \(\frac{a}{b}\approx1.05\) is also barely above \(1\) &mdash; nearly the identical shape. Shape depends on the ratio, never on the size of the gap between \(a\) and \(b\).</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">In 1694, the Swiss mathematician <strong>Jacob Bernoulli</strong> &mdash; the same Bernoulli who would later ask for a logarithmic spiral engraved on his tombstone with the motto <em>&ldquo;Eadem mutata resurgo&rdquo;</em> (&ldquo;Though changed, I rise again the same&rdquo;) &mdash; described the figure-eight curve in the journal <em>Acta Eruditorum</em> and gave it the name it still carries. He reached for a Latin word usually used for a hanging ribbon or knot, \(\textit{lemniscus}\), because the curve's two crossed loops reminded him of exactly that shape. One mathematician, two curves born from the same appetite for a shape that returns to itself.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>One family of equations, one ratio to test, and four genuinely different snails fall out of it &mdash; loop, cardioid, dimple, or smooth oval, each one a fact about \(\frac{a}{b}\) rather than a fact you have to memorize shape by shape. The lemniscate adds something new to this unit's gallery: a curve with gaps built into its own domain, present in some directions and simply absent in others. Tomorrow the gallery grows once more, into curves with even more delicate structure &mdash; roses whose petal count you will learn to predict before you ever plot a single point.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does the ratio \(\frac{a}{b}\), rather than the individual sizes of \(a\) and \(b\), determine whether a limaçon has a loop, a dimple, or neither?</p>
+    <p>2. Why does a limaçon draw an inner loop precisely when \(r\) is able to become negative, and what does a negative \(r\)-value actually do to a plotted point?</p>
+    <p>3. Why is a lemniscate undefined for some values of \(\theta\) rather than merely small or hard to see there?</p>
+    <p>4. In what sense are the four limaçon shapes and the lemniscate's two lobes all examples of the same underlying wonder &mdash; a single simple equation producing a strikingly varied family of curves?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">8-5 &middot; Limaçons and Lemniscates</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

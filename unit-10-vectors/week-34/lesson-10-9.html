@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 10-9</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q4 &middot; Unit 10</div>
+        <div style="font-size: 13px; color: #666;">Vectors</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">10-9</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Vectors</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">10-9</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Velocity, Wind, and Current</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to represent a plane's or boat's own velocity and a wind's or current's velocity as vectors, and add them to find the <strong>ground velocity</strong>.</p></li>
+        <li><p>I will be able to compute the <strong>ground speed</strong> and <strong>true course</strong> (bearing) of a plane or boat from the components of its ground-velocity vector.</p></li>
+        <li><p>I will be able to solve for the <strong>heading</strong> a pilot or navigator must fly, given a desired ground track and a known wind or current.</p></li>
+        <li><p>I will be able to distinguish carefully between a wind's <em>&ldquo;from&rdquo;</em> direction and its direction of travel, and build the correct vector every time.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Airspeed / speed relative to the current</strong>: the speed of a plane through the air, or a boat through the water &mdash; its speed relative to the moving medium it travels through, not relative to the ground.</p>
+    <p><strong>Heading</strong>: the compass direction (bearing) a pilot points the plane's nose, or a navigator points the boat's bow &mdash; the direction the vessel is <em>aimed</em>, which is not necessarily the direction it actually travels.</p>
+    <p><strong>Ground velocity (true velocity)</strong>: the vector sum of a vessel's velocity relative to its medium and the medium's velocity relative to the ground &mdash; what a stationary observer on the ground actually sees the vessel do.</p>
+    <p><strong>Bearing (true course)</strong>: a compass direction measured clockwise from due north (\(0^\circ\)), used throughout navigation to report both headings and ground tracks. On this page, a bearing of \(\theta\) corresponds to the vector \(\big(v\sin\theta,\ v\cos\theta\big)\), where the first coordinate is the eastward component and the second is the northward component.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Every sailor before satellite positioning existed had to solve some version of the problem this lesson takes up: you know how fast your vessel moves through the water or the air, and in what direction you have pointed it &mdash; but the water or the air is itself moving, carrying you sideways while you travel forward. What you actually do, over the ground, is neither your own motion nor the current's alone, but the sum of the two. This is <strong>dead reckoning</strong>, the oldest form of navigation, and it is nothing more than the vector addition you have practiced since Lesson 10-2, applied to the one problem that made ship captains and, centuries later, aircraft pilots need it in the first place.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Ground Velocity as a Vector Sum</strong></h4>
+        <p style="text-align: center;">\(\vec{v}_{\text{ground}} = \vec{v}_{\text{own}} + \vec{v}_{\text{medium}}\)</p>
+        <p>A plane's or boat's <strong>ground velocity</strong> &mdash; what an observer on the ground actually sees &mdash; is the vector sum of its own velocity (airspeed and heading, or boat speed and heading) and the velocity of the medium it travels through (wind or current). Neither piece alone tells you where the vessel really goes; only their sum does.</p>
+    </div>
+
+    <p>To add these vectors, every bearing has to become a component vector first. A bearing \(\theta\) is measured clockwise from north, so a vessel moving at speed \(v\) on bearing \(\theta\) has velocity components \(\big(v\sin\theta,\ v\cos\theta\big)\) &mdash; eastward component first, northward component second. This is the same idea as \((r\cos\theta, r\sin\theta)\) from Lesson 10-6's trigonometric form, just measured from north instead of from the positive \(x\)-axis, because that is the convention navigation has used for centuries.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: &ldquo;Wind FROM the North&rdquo; Blows <em>Toward</em> the South</strong></h4>
+        <p style="margin-bottom: 0;">Meteorologists and pilots always report wind by the direction it is <strong>coming from</strong>, never the direction it is blowing <strong>toward</strong>. A &ldquo;wind from the north at 50 mph&rdquo; is air moving <em>southward</em> &mdash; its velocity vector points on bearing \(180^\circ\), not \(0^\circ\). Before you write down a single component, say the direction of travel out loud, in your own words, and only then convert it to a bearing.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>An airplane flies with an airspeed of \(400\) mph on a heading of \(90^\circ\) (due east). The wind is blowing <em>from the north</em> at \(50\) mph. Find the plane's ground velocity vector, its ground speed, and its true course (bearing).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Plane's own velocity vector (bearing \(90^\circ\), speed \(400\)): \(\big(400\sin90^\circ,\ 400\cos90^\circ\big)=(400,0)\).</p>
+    <p>Wind vector: the wind is <em>from the north</em>, so it blows <em>toward the south</em>, bearing \(180^\circ\), speed \(50\): \(\big(50\sin180^\circ,\ 50\cos180^\circ\big)=(0,-50)\).</p>
+    <p style="text-align: center;">\(\vec{v}_{\text{ground}} = (400,0)+(0,-50) = (400,-50)\)</p>
+    <p>Ground speed: \(\left|\vec{v}_{\text{ground}}\right| = \sqrt{400^2+50^2} = \sqrt{162500} = 50\sqrt{65}\approx 403.1\) mph.</p>
+    <p>True course: the vector \((400,-50)\) points mostly east with a slight southward tilt. Measuring clockwise from north, the bearing is \(90^\circ+\arctan\!\left(\dfrac{50}{400}\right)\approx 90^\circ+7.1^\circ\approx 97.1^\circ\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Ground velocity \((400,-50)\); ground speed \(\approx403.1\) mph; true course \(\approx097.1^\circ\). Notice that even though the plane is <em>headed</em> due east, it actually <em>travels</em> along a course tilted slightly south of east &mdash; the wind has pushed it off its heading.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A boat's motor propels it at \(12\) mph relative to the water, on a heading of bearing \(30^\circ\). The current flows toward bearing \(120^\circ\) at \(4\) mph. Find the boat's resultant velocity relative to the ground &mdash; its ground speed and bearing.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Boat's own velocity: \(\big(12\sin30^\circ,\ 12\cos30^\circ\big)=(6,\ 6\sqrt3)\).</p>
+    <p>Current's velocity: \(\big(4\sin120^\circ,\ 4\cos120^\circ\big)=(2\sqrt3,\ -2)\).</p>
+    <p style="text-align: center;">\(\vec{v}_{\text{ground}} = (6+2\sqrt3,\ 6\sqrt3-2)\approx(9.46,\ 8.39)\)</p>
+    <p>Ground speed: \(\left|\vec{v}_{\text{ground}}\right| = \sqrt{(6+2\sqrt3)^2+(6\sqrt3-2)^2}=\sqrt{160}=4\sqrt{10}\approx12.6\) mph.</p>
+    <p>Bearing: \(\arctan\!\left(\dfrac{9.46}{8.39}\right)\approx48.4^\circ\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Ground velocity \(\approx(9.46,8.39)\); ground speed \(\approx12.6\) mph on bearing \(\approx048.4^\circ\). The current has swung the boat's actual path well off its \(30^\circ\) heading &mdash; this is exactly why river and channel pilots must aim upstream of where they mean to land.</p>
+
+    <div style="background: #FFFFFF; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0; overflow-x: auto;">
+        <h4 style="margin-top: 0; color: #0E1C42;">The Harder Question: Correcting for the Wind</h4>
+        <p>Examples 1 and 2 both started from a known heading and asked what actually happens. Real pilots more often face the reverse problem: <em>I need to arrive due north of here. What heading do I fly?</em> This is the <strong>wind correction angle</strong> &mdash; and solving it means setting up the same vector sum, but with the heading as the unknown instead of the answer.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 3</span> &mdash; Honors: Solving for the Heading</h4>
+    <p>A pilot wants her plane's ground track to run due north (bearing \(0^\circ\)). Her airspeed is \(300\) mph. The wind is blowing <em>from the west</em>, toward the east, at \(40\) mph. What heading should she fly, and what will her resulting ground speed be?</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Wind vector (bearing \(90^\circ\), speed \(40\)): \((40,0)\).</p>
+    <p>Let \(\theta\) be the unknown heading. The plane's own velocity is \(\big(300\sin\theta,\ 300\cos\theta\big)\). For the <em>ground</em> track to be due north, the eastward components must cancel entirely:</p>
+    <p style="text-align: center;">\(300\sin\theta + 40 = 0 \quad\Longrightarrow\quad \sin\theta = -\dfrac{40}{300} = -\dfrac{2}{15}\)</p>
+    <p>\(\theta = \arcsin\!\left(-\dfrac{2}{15}\right)\approx-7.7^\circ\) &mdash; that is, bearing \(352.3^\circ\), or \(\text{N}7.7^\circ\text{W}\): she must point the nose slightly <em>west</em> of north to counteract the eastward wind.</p>
+    <p>Ground speed \(=300\cos\theta = 300\sqrt{1-\left(\tfrac{2}{15}\right)^2}=300\cdot\dfrac{\sqrt{221}}{15}=20\sqrt{221}\approx297.3\) mph.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Heading \(\approx\text{N}7.7^\circ\text{W}\) (bearing \(352.3^\circ\)); resulting ground speed \(\approx297.3\) mph &mdash; slightly slower than her airspeed, since part of her airspeed is now spent fighting the crosswind instead of moving her forward.</p>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128202; Excel Moment: A Wind-Correction Table</h4>
+        <p>A pilot planning a real route rarely checks just one wind scenario &mdash; she checks several, because forecast winds shift. Build a small spreadsheet with columns for <strong>heading (\(\theta\))</strong>, <strong>airspeed east/north components</strong> (\(=v\sin\theta,\ v\cos\theta\)), <strong>wind east/north components</strong>, <strong>resultant east/north components</strong> (a sum of the two prior columns), and finally <strong>ground speed</strong> (\(=\sqrt{\text{east}^2+\text{north}^2}\), built with Excel's own square-root and sum-of-squares functions). Row down through several candidate headings for a fixed airspeed and wind, and watch the ground speed and ground track shift as the heading changes. This is precisely the tool this week's applied task, the Flight Plan, will ask you to build out further &mdash; today's table is the rehearsal.</p>
+    </div>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Checking a Resultant with Desmos</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), type <strong>(400, 0)</strong> and <strong>(400, -50)</strong> as two points, and connect the origin to each with a segment &mdash; this draws Example 1's plane vector and its ground-velocity vector tip to tail. Visually confirm that the ground-velocity arrow tilts slightly below the plane's due-east heading, matching the wind's southward push. You can check any wind-and-heading combination the same way: plot the own-velocity vector, add the wind vector components, and plot the sum.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A plane flies airspeed \(300\) mph on heading \(45^\circ\). The wind is from the east (blowing toward bearing \(270^\circ\)) at \(40\) mph. Find the ground velocity vector and ground speed.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Plane vector: \((300\sin45^\circ,300\cos45^\circ)=(212.1,212.1)\). Wind vector: \((40\sin270^\circ,40\cos270^\circ)=(-40,0)\). Ground velocity \(\approx(172.1,212.1)\). Ground speed \(=\sqrt{172.1^2+212.1^2}\approx273.2\) mph, on bearing \(\approx39.1^\circ\) &mdash; the westward wind has bent the plane's course to the left of its \(45^\circ\) heading.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Writing &ldquo;wind from the north&rdquo; as the vector \((0,50)\) instead of \((0,-50)\). A wind reported <em>from</em> a direction always travels <em>toward</em> the opposite direction &mdash; add \(180^\circ\) to the &ldquo;from&rdquo; bearing before you build the vector. Getting this backward doesn't just shrink your answer, it can add exactly where it should subtract, which is a much harder mistake to catch by eye than it sounds.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Every ground velocity in this lesson was the same vector addition you have practiced since Lesson 10-2 &mdash; own velocity plus medium velocity &mdash; applied to the one problem that gave vector addition its original, urgent reason for existing. Tomorrow the vectors stop moving and start pushing: Lesson 10-10 asks what it takes for several forces, pulling in different directions at once, to hold a system perfectly still.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why is &ldquo;wind from the north&rdquo; not the same statement as &ldquo;wind blowing north,&rdquo; and what happens to your entire answer if you mix the two up?</p>
+    <p>2. Why can a plane's ground speed be either faster or slower than its airspeed, depending on the wind &mdash; what has to be true about the wind's direction for each case?</p>
+    <p>3. In Example 3, why does correcting for a crosswind mean flying a heading that is <em>not</em> the same as your intended ground track?</p>
+    <p>4. If you doubled the wind speed in Example 1 but kept everything else the same, would the true course bearing move closer to or farther from \(90^\circ\)? Why?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 4 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">10-9 &middot; Velocity, Wind, and Current</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 7-3</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 7</div>
+        <div style="font-size: 13px; color: #666;">Trigonometric Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">7-3</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Trigonometric Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">7-3</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Phase Shift and Full Transformations</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to graph \(y = A\sin\big(B(x-C)\big) + D\), correctly locating the phase shift \(C\) even when the equation is not already written with \(B\) factored out.</p></li>
+        <li><p>I will be able to extract all four key features &mdash; amplitude, period, midline, and phase shift &mdash; from either a transformed equation or a graph.</p></li>
+        <li><p>I will be able to verify a phase-shifted equation by evaluating it at the shift point itself and confirming the result matches the parent function's starting behavior.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Phase shift</strong>: the horizontal translation \(C\) in \(y = A\sin\big(B(x-C)\big)+D\) &mdash; the amount the parent wave's cycle is slid left or right before any stretching or shifting is applied. A positive \(C\) slides the graph right; a negative \(C\) slides it left.</p>
+    <p><strong>Horizontal translation</strong>: another name for the same slide &mdash; every point on the parent graph moves \(C\) units along the \(x\)-axis, and no point moves vertically because of it.</p>
+    <p><strong>Argument</strong>: the entire expression inside the trigonometric function &mdash; in \(y=\sin\big(B(x-C)\big)\), the argument is \(B(x-C)\). Reading a phase shift correctly always means reading the argument in its <em>factored</em> form.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Every wave you graphed yesterday made one unexamined assumption: that its cycle happened to begin exactly at \(x=0\). Real periodic behavior is almost never so obliging. A tide is not high at midnight just because a clock reads zero there; an electrical generator does not happen to start its cycle at the instant an engineer starts the stopwatch. Power engineers have a name for what happens when two waves of the same frequency do <em>not</em> agree on where their cycles begin: they are <em>out of phase</em>, and connecting two out-of-phase generators to the same grid without first aligning them can send a damaging surge of current through both machines. Aligning phase before connection is not a fine point &mdash; it is a required, disciplined step, another face of this unit's self-government: two waves keeping the very same law, in step with each other, by agreement rather than by accident.</p>
+
+    <p>Today's fourth parameter, \(C\), is what lets an equation admit that its cycle can start anywhere &mdash; and it is also the parameter most often read incorrectly, because it hides inside an expression that usually has to be <em>factored</em> before it can be trusted.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Full Transformation, and the One Step You Cannot Skip</strong></h4>
+        <p>For \(y = A\sin\big(B(x-C)\big) + D\) (identically for cosine):</p>
+        <p style="text-align: center;">Amplitude \(=|A| \qquad\) Period \(=\dfrac{2\pi}{|B|} \qquad\) Midline: \(y=D \qquad\) Phase shift \(= C\)</p>
+        <p>The formula above assumes the argument is already written as \(B(x-C)\) &mdash; a single factor of \(B\), multiplying the quantity \((x-C)\). Equations rarely arrive that way. Given \(y=\sin(3x-\pi)\), the phase shift is <strong>not</strong> \(\pi\); the argument must first be factored, \(3x-\pi = 3\left(x-\frac{\pi}{3}\right)\), which reveals the true phase shift \(C=\frac{\pi}{3}\). Skipping the factoring step and reading the constant term directly off an unfactored argument is the single most common error in this entire lesson &mdash; and it is avoidable every time, by the same one habit: factor \(B\) out of the argument before you read anything from it.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>State the amplitude, period, midline, and phase shift of \(y = 2\sin\left(3x-\dfrac{\pi}{2}\right)+1\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Factor \(B=3\) out of the argument first:</p>
+    <p style="text-align: center;">\(3x-\dfrac{\pi}{2} = 3\left(x-\dfrac{\pi}{6}\right)\)</p>
+    <p>Check the factoring by distributing back: \(3\left(x-\frac{\pi}{6}\right) = 3x - \frac{3\pi}{6} = 3x-\frac{\pi}{2}\). &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Amplitude \(=2\); period \(=\dfrac{2\pi}{3}\); midline \(y=1\); phase shift \(C=\dfrac{\pi}{6}\), a slide to the <strong>right</strong>. The wave behaves exactly like \(y=2\sin(3x)+1\), just started one-sixth of a full turn later.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A cosine-shaped graph has a maximum value of \(4\) at \(x=\dfrac{\pi}{4}\), a midline of \(y=0\), and a period of \(\pi\). Write its equation.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Amplitude \(=4\) (the distance from midline to max). Since a parent cosine graph reaches its maximum where its argument equals \(0\), and this graph's maximum falls at \(x=\frac{\pi}{4}\), the phase shift is \(C=\frac{\pi}{4}\). From the period: \(\frac{2\pi}{B}=\pi \Rightarrow B=2\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(y=4\cos\left(2\left(x-\dfrac{\pi}{4}\right)\right)\). Check: at \(x=\frac{\pi}{4}\), the argument is \(2(0)=0\), so \(y=4\cos(0)=4\) &mdash; the maximum, exactly where required.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>State the amplitude, period, midline, and phase shift of \(y=-3\sin(\pi x+\tfrac{\pi}{3})-2\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Factor \(B=\pi\) out of the argument:</p>
+    <p style="text-align: center;">\(\pi x + \dfrac{\pi}{3} = \pi\left(x+\dfrac{1}{3}\right) = \pi\left(x-\left(-\dfrac{1}{3}\right)\right)\)</p>
+    <p>Written as \(B(x-C)\), this forces \(C=-\dfrac13\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Amplitude \(=|{-3}|=3\); period \(=\dfrac{2\pi}{\pi}=2\); midline \(y=-2\); phase shift \(C=-\dfrac13\), a slide to the <strong>left</strong>. The negative \(A\) also reflects the graph &mdash; where an unshifted, unreflected sine would rise from its midline, this one falls.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Verify Example 1's transformation by evaluating \(y=2\sin\left(3x-\frac{\pi}{2}\right)+1\) at \(x=\frac{\pi}{6}\) (the phase-shift point) and at \(x=\frac{\pi}{3}\) (one quarter-period later, since a quarter of the new period \(\frac{2\pi}{3}\) is \(\frac{\pi}{6}\)).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(x=\dfrac{\pi}{6}:\quad 3\left(\dfrac{\pi}{6}\right)-\dfrac{\pi}{2} = \dfrac{\pi}{2}-\dfrac{\pi}{2}=0 \;\;\Rightarrow\;\; y=2\sin(0)+1=1\)</p>
+    <p style="text-align: center;">\(x=\dfrac{\pi}{3}:\quad 3\left(\dfrac{\pi}{3}\right)-\dfrac{\pi}{2} = \pi-\dfrac{\pi}{2}=\dfrac{\pi}{2} \;\;\Rightarrow\;\; y=2\sin\left(\dfrac{\pi}{2}\right)+1=2(1)+1=3\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> At the phase-shift point \(x=\frac{\pi}{6}\), the function equals \(1\) &mdash; the midline &mdash; exactly where an unshifted sine begins its rise. A quarter-period later, at \(x=\frac{\pi}{3}\), it reaches \(3\), the maximum (midline \(1\) plus amplitude \(2\)). Both checks confirm the phase shift found by factoring is correct: the whole shape of \(y=2\sin(3x)+1\) is simply riding \(\frac{\pi}{6}\) units later on the \(x\)-axis.</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>A sinusoidal graph's highest point is \(\left(\dfrac{\pi}{3},5\right)\), and its next lowest point (moving right) is \(\left(\dfrac{4\pi}{3},-1\right)\). Find its equation, assuming a cosine-shaped graph.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Midline \(D=\dfrac{5+(-1)}{2}=2\). Amplitude \(A=\dfrac{5-(-1)}{2}=3\). The distance from a maximum to the very next minimum is exactly <strong>half</strong> a period:</p>
+    <p style="text-align: center;">\(\dfrac{4\pi}{3}-\dfrac{\pi}{3} = \dfrac{3\pi}{3}=\pi = \dfrac12(\text{period}) \;\;\Rightarrow\;\; \text{period}=2\pi \;\;\Rightarrow\;\; B=\dfrac{2\pi}{2\pi}=1\)</p>
+    <p>Since a parent cosine reaches its maximum where its argument is \(0\), and this graph's maximum is at \(x=\frac{\pi}{3}\), the phase shift is \(C=\frac{\pi}{3}\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(y = 3\cos\left(x-\dfrac{\pi}{3}\right)+2\). Check the minimum: at \(x=\frac{4\pi}{3}\), the argument is \(\frac{4\pi}{3}-\frac{\pi}{3}=\pi\), and \(\cos\pi=-1\), giving \(y=3(-1)+2=-1\) &mdash; matching the given minimum exactly.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE UNFACTORED PHASE SHIFT</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student asked an AI to state the phase shift of \(y=\sin(2x-\pi)\). It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;The equation is \(\sin(2x-\pi)\), so the phase shift is \(\pi\), and the graph shifts right by \(\pi\) units.&rdquo;</p>
+            <p>The AI read the constant term straight off the <em>unfactored</em> argument, skipping the one required step: dividing \(B=2\) back out. Factor correctly first: \(2x-\pi = 2\left(x-\frac{\pi}{2}\right)\), so the true phase shift is \(C=\frac{\pi}{2}\) &mdash; the graph shifts right by only <em>half</em> as much as the AI claimed.</p>
+            <p>Notice the pattern in the error: the AI's answer, \(\pi\), is exactly \(B=2\) times the correct answer, \(\frac{\pi}{2}\). This is not a coincidence &mdash; skipping the factoring step always overstates (or understates) the phase shift by a factor of \(B\), because the constant term in an unfactored argument is \(BC\), not \(C\) itself.</p>
+            <p style="margin-bottom: 0;">Before trusting any phase shift &mdash; yours or a machine's &mdash; check that the argument was actually factored into the form \(B(x-C)\) before a number was read from it, and verify by distributing the factored form back out to confirm it reproduces the original argument, exactly as Example 1 did.</p>
+        </div>
+    </div>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Confirming a Phase Shift</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a>, type Example 1's equation, <strong>y = 2sin(3x - pi/2) + 1</strong>, on one line, and its factored twin, <strong>y = 2sin(3(x - pi/6)) + 1</strong>, on the next. The two graphs should sit exactly on top of each other &mdash; a direct visual confirmation that factoring changed nothing about the function, only how easy its phase shift is to read. Then trace to \(x=\frac{\pi}{6}\) and confirm Desmos reports \(y=1\), matching Example 4's hand computation exactly.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: State the amplitude, period, midline, and phase shift of \(y=\cos(2x+\pi)-3\). Factor before you answer.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(2x+\pi = 2\left(x+\frac{\pi}{2}\right) = 2\left(x-\left(-\frac{\pi}{2}\right)\right)\), so \(C=-\frac{\pi}{2}\) (a shift left). Amplitude \(=1\); period \(=\frac{2\pi}{2}=\pi\); midline \(y=-3\); phase shift \(\frac{\pi}{2}\) units left.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A sine-shaped graph has its midline crossing (rising) at \(x=\pi\), amplitude \(2\), midline \(y=0\), and period \(4\pi\). Write its equation.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            A parent sine rises through its midline where its argument is \(0\); here that happens at \(x=\pi\), so \(C=\pi\). \(B=\frac{2\pi}{4\pi}=\frac12\). Equation: \(y=2\sin\left(\frac12(x-\pi)\right)\).
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Losing track of the sign once the factoring is done correctly. The form is \(B(x-C)\) &mdash; a <em>minus</em> sign built into the pattern. If the factored argument reads \(B(x+\frac{\pi}{2})\), that is \(B\big(x-(-\frac{\pi}{2})\big)\), so \(C=-\frac{\pi}{2}\) and the shift is to the <em>left</em>, not to the right. Writing "phase shift \(=\frac{\pi}{2}\), shift right" from an argument of \((x+\frac{\pi}{2})\) is the mirror image of the unfactored-\(B\) error above &mdash; the magnitude is right, but the direction has been read backward.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">A power grid's alternating current is one enormous sinusoid, and every generator feeding it must match not only its frequency but its <em>phase</em> before the connection is made &mdash; engineers use an instrument called a synchroscope for exactly this purpose. Two generators at the same frequency but different phase are, mathematically, the very same wave with two different values of \(C\); connecting them anyway is like asking two dancers keeping perfect but mismatched time to suddenly share one set of footsteps.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Amplitude, period, midline, phase shift &mdash; four numbers now completely describe any sinusoidal graph, in either direction: given the equation, you can find the graph; given the graph, you can find the equation. Factoring \(B\) out of the argument before reading anything from it is the one habit that makes every one of today's extractions reliable, whether the question comes from a textbook, a lab reading, or an AI tutor's confident-sounding claim. Sine and cosine have now given up everything they have to give in graph form. What they cannot do is describe a function that breaks &mdash; that shoots to infinity and starts over, rather than smoothly rising and falling. Tomorrow, four more trigonometric functions enter the unit, each built from sine and cosine as a quotient, and each one paying for that quotient with places where it simply cannot be evaluated at all.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why must the argument of a transformed sine or cosine function be factored into the form \(B(x-C)\) before its phase shift can be read correctly?</p>
+    <p>2. How does evaluating a transformed function at its phase-shift point \(x=C\) provide a check on whether the phase shift was extracted correctly?</p>
+    <p>3. Why does a maximum-to-next-minimum distance on a graph always equal exactly half a period, and how does that fact let you find \(B\) without ever being told the period directly?</p>
+    <p>4. In what sense does requiring two generators to share the same phase before connecting them express the same discipline as requiring an equation's argument to be factored correctly before its phase shift is trusted?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">7-3 &middot; Phase Shift and Full Transformations</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

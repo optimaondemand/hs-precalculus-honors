@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 7-10</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 7</div>
+        <div style="font-size: 13px; color: #666;">Trigonometric Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">7-10</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Trigonometric Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">7-10</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">The Ambiguous Case</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to analyze SSA (side-side-angle) triangle data and determine, before solving anything, whether it describes zero, one, or two triangles.</p></li>
+        <li><p>I will be able to solve every case the analysis produces, including both triangles when two exist.</p></li>
+        <li><p>I will be able to judge an AI's triangle solution against the full case analysis, and catch a solution the AI reported with confidence but without completeness.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>SSA (side-side-angle)</strong>: A triangle data pattern giving two sides and an angle that is <em>not</em> included between them &mdash; the one case, unlike AAS/ASA/SAS/SSS, that does not guarantee a single triangle.</p>
+    <p><strong>Ambiguous case</strong>: The situation SSA data can create, where the given measurements are consistent with zero, one, or two distinct triangles, depending on how the given side compares to a threshold height.</p>
+    <p><strong>Swing height</strong> (\(h = b\sin A\)): Picture the given angle \(A\) at one vertex with the known adjacent side \(b\) laid down; the other given side, \(a\), is free to swing like a compass needle around the far end of \(b\) until it reaches the required length. The height \(h=b\sin A\) is the shortest that swinging side can ever reach the base line &mdash; the hinge point of the entire case analysis.</p>
+    <p><strong>Supplementary companion angle</strong>: When the Law of Sines gives \(\sin B\) for an unknown angle, both \(B\) and \(180^\circ - B\) share that sine. Whether the second, obtuse value is a legitimate second triangle &mdash; or an impostor that breaks the angle sum &mdash; is exactly what the case analysis exists to decide.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday's lesson closed on a warning: the Law of Sines guarantees exactly one triangle only when the given side is matched directly against a known angle. SSA data breaks that guarantee on purpose &mdash; two sides are given, but the angle sits at one end of the known side, not across from the <em>other</em> known side. That other side is left free to swing, like the second hand of a hinge, and depending on its length, it may swing down to meet the base in one place, two places, or nowhere at all. This is not a flaw in the Law of Sines; the Law of Sines is doing exactly what it is told. The flaw would be in a student &mdash; or a machine &mdash; that solves for one angle and stops without asking whether a second, equally valid triangle is hiding behind the first.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Four Outcomes of SSA</strong></h4>
+        <p>Given angle \(A\), the side \(b\) adjacent to it, and the side \(a\) opposite it, compute the <strong>swing height</strong> \(h = b\sin A\) &mdash; the shortest possible distance from the far end of \(b\) down to the base line. Then:</p>
+        <p><strong>If \(A\) is acute</strong> (the ordinary case):</p>
+        <p style="margin: 4px 0;">&bull; \(a < h\): side \(a\) is too short to reach the base at all &mdash; <strong>no triangle</strong>.</p>
+        <p style="margin: 4px 0;">&bull; \(a = h\): side \(a\) just reaches, meeting the base at a right angle &mdash; <strong>exactly one triangle</strong> (a right triangle).</p>
+        <p style="margin: 4px 0;">&bull; \(h < a < b\): side \(a\) is long enough to swing down and cross the base line in <em>two</em> places before it gets past \(b\) &mdash; <strong>two triangles</strong>.</p>
+        <p style="margin: 4px 0;">&bull; \(a \ge b\): side \(a\) is at least as long as \(b\), so it swings past the base only once &mdash; <strong>exactly one triangle</strong>.</p>
+        <p><strong>If \(A\) is right or obtuse:</strong></p>
+        <p style="margin: 4px 0;">&bull; \(a > b\): <strong>exactly one triangle</strong>.</p>
+        <p style="margin-bottom: 0;">&bull; \(a \le b\): <strong>no triangle</strong> &mdash; there is no room for a right or obtuse angle to close a triangle when the side across from it is not the longest side.</p>
+    </div>
+
+    <p>Solving Law-of-Sines produces \(\sin B\) for the unknown angle \(B\), and every sine value between \(0\) and \(1\) belongs to <em>two</em> angles between \(0^\circ\) and \(180^\circ\) &mdash; one acute, one obtuse, adding to \(180^\circ\). The case analysis above is really a fast way of answering one question honestly: after \(A\) and the acute solution for \(B\) are added, is there still room under \(180^\circ\) for the obtuse companion to be a real angle in a real triangle? The four bullet points are a shortcut for checking that by hand every time &mdash; and the discipline of running the check, rather than trusting the first number the calculator returns, is this unit's self-government at its most literal.</p>
+
+    <h4><span style="color: #f67a0c;">Example 1</span> &mdash; No Triangle</h4>
+    <p>Determine how many triangles are described by \(A = 40^\circ\), \(b = 25\), \(a = 12\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(A\) is acute. Swing height: \(h = b\sin A = 25\sin40^\circ \approx 25(0.6428) \approx 16.07\). Compare: \(a = 12 < h \approx 16.07\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Side \(a\) is shorter than the minimum distance needed to reach the base line at all &mdash; <strong>no triangle exists</strong> with this data. (If you tried to force the Law of Sines anyway, \(\sin B = \dfrac{b\sin A}{a} = \dfrac{16.07}{12}\approx1.34\) &mdash; a sine greater than \(1\), which is itself the algebra confirming that no such angle, and therefore no such triangle, exists.)</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span> &mdash; Exactly One Triangle</h4>
+    <p>Determine how many triangles are described by \(A = 50^\circ\), \(b = 18\), \(a = 20\), and solve any that exist.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(A\) is acute, and \(a = 20 \ge b = 18\), so this falls in the &ldquo;exactly one triangle&rdquo; case. Solve: \(\sin B = \dfrac{b\sin A}{a} = \dfrac{18\sin50^\circ}{20} \approx \dfrac{18(0.7660)}{20} \approx 0.6894\), giving \(B \approx 43.6^\circ\) or the supplementary companion \(B'\approx 136.4^\circ\). Check the companion: \(A + B' \approx 50^\circ + 136.4^\circ = 186.4^\circ\), which already exceeds \(180^\circ\) &mdash; impossible, so the companion is discarded, confirming the case rule. With \(B\approx43.6^\circ\): \(C = 180^\circ-50^\circ-43.6^\circ\approx86.4^\circ\), and \(c = \dfrac{a\sin C}{\sin A} = \dfrac{20\sin86.4^\circ}{\sin50^\circ}\approx26.06\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Exactly one triangle: \(B\approx43.6^\circ\), \(C\approx86.4^\circ\), \(c\approx26.06\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span> &mdash; Two Triangles</h4>
+    <p>Determine how many triangles are described by \(A = 30^\circ\), \(a = 15\), \(b = 20\), and solve every one that exists.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(A\) is acute. Swing height: \(h = b\sin A = 20\sin30^\circ = 20(0.5) = 10\). Compare: \(h = 10 < a = 15 < b = 20\) &mdash; this is the two-triangle case.</p>
+    <p style="text-align: center;">\(\sin B = \dfrac{b\sin A}{a} = \dfrac{20(0.5)}{15} = \dfrac{10}{15} \approx 0.6667 \;\;\Rightarrow\;\; B_1 \approx 41.8^\circ \;\text{ or }\; B_2 \approx 180^\circ - 41.8^\circ \approx 138.2^\circ\)</p>
+    <p>Check both against the angle sum before solving further: \(A+B_1 \approx 30^\circ+41.8^\circ=71.8^\circ<180^\circ\) &#10003;, and \(A+B_2\approx30^\circ+138.2^\circ=168.2^\circ<180^\circ\) &#10003; &mdash; both survive. This confirms two genuinely distinct triangles.</p>
+    <p><strong>Triangle 1</strong> (\(B_1\approx41.8^\circ\)): \(C_1 = 180^\circ-30^\circ-41.8^\circ\approx108.2^\circ\); \(c_1 = \dfrac{a\sin C_1}{\sin A} = \dfrac{15\sin108.2^\circ}{\sin30^\circ}\approx\dfrac{15(0.9500)}{0.5}\approx28.50\). Triangle inequality: \(15+20>28.50\) &#10003;.</p>
+    <p><strong>Triangle 2</strong> (\(B_2\approx138.2^\circ\)): \(C_2 = 180^\circ-30^\circ-138.2^\circ\approx11.8^\circ\); \(c_2 = \dfrac{a\sin C_2}{\sin A} = \dfrac{15\sin11.8^\circ}{\sin30^\circ}\approx\dfrac{15(0.2046)}{0.5}\approx6.14\). Triangle inequality: \(15+6.14>20\) &#10003; (holds, though narrowly &mdash; worth double-checking on any two-triangle problem).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Two triangles: one obtuse (\(B_1\approx41.8^\circ, C_1\approx108.2^\circ, c_1\approx28.50\)) and one acute-cornered but with a small far angle (\(B_2\approx138.2^\circ, C_2\approx11.8^\circ, c_2\approx6.14\)). The same three starting numbers, \(A=30^\circ, a=15, b=20\), are simply consistent with both &mdash; a fact no amount of solving only the first triangle would ever reveal.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE MISSING SECOND TRIANGLE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student gave an AI the following: &ldquo;In a triangle, \(A = 35^\circ\), \(a = 18\), \(b = 24\). Solve the triangle.&rdquo; The AI answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;Using the Law of Sines: sin(B) = (24&middot;sin35&deg;)/18 &asymp; 0.765, so B &asymp; 49.9&deg;. Then C = 180&deg; &minus; 35&deg; &minus; 49.9&deg; &asymp; 95.1&deg;, and c = (18&middot;sin95.1&deg;)/sin35&deg; &asymp; 31.3. So the triangle has B &asymp; 49.9&deg;, C &asymp; 95.1&deg;, c &asymp; 31.3.&rdquo;</p>
+            <p>Every number in that answer is correct &mdash; as far as it goes. But the AI never ran the case analysis before solving. Check it: \(A=35^\circ\) is acute, and the swing height is \(h = b\sin A = 24\sin35^\circ \approx 24(0.5736) \approx 13.77\). Since \(h \approx 13.77 < a = 18 < b = 24\), this is a <strong>two-triangle case</strong> &mdash; and the AI reported only one.</p>
+            <p>The missing second triangle uses the supplementary companion angle: \(B_2 = 180^\circ - 49.9^\circ \approx 130.1^\circ\). Check it against the angle sum: \(A + B_2 \approx 35^\circ+130.1^\circ = 165.1^\circ < 180^\circ\) &mdash; legitimate. Then \(C_2 = 180^\circ-35^\circ-130.1^\circ\approx14.9^\circ\), and \(c_2 = \dfrac{a\sin C_2}{\sin A} = \dfrac{18\sin14.9^\circ}{\sin35^\circ}\approx\dfrac{18(0.2571)}{0.5736}\approx8.06\). A quick triangle-inequality check confirms it closes: \(18+8.06>24\)? No &mdash; check carefully: \(18+8.06=26.06>24\) &#10003;, and the other two sums are larger still. This second triangle is genuine.</p>
+            <p style="margin-bottom: 0;">The AI's arithmetic was not wrong; its <em>method</em> was incomplete &mdash; it solved for one value of \(B\) and stopped, the same shortcut a rushed student takes. Before accepting any SSA solution, yours or a machine's, compute the swing height \(h=b\sin A\) yourself and run the four-case check. An answer that skips that step has not actually solved the triangle &mdash; it has solved <em>a</em> triangle, and possibly not all of them.</p>
+        </div>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Solving \(\sin B\) and reporting only the calculator's default (acute) answer, exactly as the AI did above. A calculator's <code>sin&#8315;&sup1;</code> key is built to return one angle between \(-90^\circ\) and \(90^\circ\) &mdash; it has no way of knowing a triangle problem might need the obtuse companion instead, or in addition. Whenever SSA data is on the table, treat every inverse-sine result as only half the story until the case analysis says otherwise.</div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: How many triangles do \(A=25^\circ\), \(b=12\), \(a=15\) describe? (You do not need to solve them &mdash; just classify.)</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(A\) is acute and \(a=15 \ge b=12\), so this is the &ldquo;exactly one triangle&rdquo; case &mdash; no need to even compute \(h\) once \(a\ge b\) is confirmed.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Why can the ambiguous case never occur when the given angle \(A\) is obtuse and \(a > b\)?</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Because with \(A\) obtuse, the supplementary companion angle for \(B\) would also have to be obtuse-adjacent in a way that forces \(A+B>180^\circ\) unless \(B\) is small and unique &mdash; a triangle can have only one obtuse (or right) angle, so once \(A\) itself is obtuse, \(B\) is forced acute and its own supplementary companion is automatically ruled out by the angle sum. There is only ever room for one obtuse corner.
+        </div>
+    </details>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128187; ON YOUR CALCULATOR</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Build Example 3's two triangles in Desmos (<a href="https://www.desmos.com/calculator">desmos.com/calculator</a>) as a visual check: place \(A\) at the origin with side \(b=20\) laid along the positive \(x\)-axis to a point \(B=(20,0)\), so the terminal side of the \(30^\circ\) angle is the ray \(y=\tan(30^\circ)x\) for \(x\ge0\). Then graph the circle \((x-20)^2+y^2=15^2\) (radius \(a=15\), centered at \(B\)). The circle crosses that ray in <strong>two</strong> points &mdash; each intersection is one solution triangle's third vertex \(C\), a picture of exactly what the algebra found.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Every SSA problem now answers to the same discipline: compute the swing height, run the four-case check, and only then solve &mdash; and when two triangles exist, solve both, the way a well-governed argument accounts for every possibility it has admitted rather than the first one it happened to find. That discipline is worth carrying forward, because Lesson 7-11 removes the ambiguity altogether: the Law of Cosines, built from SAS or SSS data, never needs a case check at all &mdash; a fact you are about to prove for yourself, twice.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why is SSA data fundamentally different from AAS, ASA, SAS, and SSS in what it can guarantee about a triangle's existence and uniqueness?</p>
+    <p>2. What does the swing height \(h = b\sin A\) actually represent geometrically, and why does comparing \(a\) to it (and to \(b\)) settle every case?</p>
+    <p>3. In the AI checkpoint, what specific step did the AI skip, and why did skipping it produce an answer that was locally correct but globally incomplete?</p>
+    <p>4. Why can a triangle never have two obtuse angles, and how does that fact rule out the ambiguous case whenever the given angle itself is obtuse?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">7-10 &middot; The Ambiguous Case</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 7-2</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 7</div>
+        <div style="font-size: 13px; color: #666;">Trigonometric Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">7-2</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Trigonometric Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">7-2</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Amplitude, Period, and Midline</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to graph \(y = A\sin(Bx) + D\) by identifying its amplitude, period, and midline from the parameters \(A\), \(B\), and \(D\).</p></li>
+        <li><p>I will be able to explain what each parameter physically does to the parent wave &mdash; \(A\) a vertical stretch (and possible reflection), \(B\) a horizontal stretch or compression, and \(D\) a vertical shift.</p></li>
+        <li><p>I will be able to determine the equation of a transformed sine or cosine function directly from its graph or from a verbal description of its maximum, minimum, and period.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Parameter</strong>: a constant in a function's equation that controls one specific feature of its graph &mdash; in \(y = A\sin(Bx) + D\), the numbers \(A\), \(B\), and \(D\) are parameters.</p>
+    <p><strong>Vertical stretch / compression</strong>: multiplying every output of a function by a constant \(A\), scaling the graph's height (and, if \(A\) is negative, flipping it across the midline) without touching its period.</p>
+    <p><strong>Horizontal stretch / compression</strong>: multiplying the input \(x\) by a constant \(B\) before applying the function, scaling how quickly the input completes one cycle &mdash; a larger \(|B|\) speeds the wave up (shorter period), a smaller \(|B|\) slows it down (longer period).</p>
+    <p><strong>Vertical shift</strong>: adding a constant \(D\) to every output of a function, sliding the entire graph up or down and relocating its midline to \(y=D\).</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Yesterday's wave was disciplined but plain: reaching only \(1\) unit above and below its midline of \(y=0\), completing its cycle only every \(2\pi\) units, resting only on the \(x\)-axis. No real Ferris wheel, no real tide, and no real vibrating string is built to those exact specifications. A wheel might have a \(20\)-meter radius and a hub \(22\) meters off the ground; a tuning fork might complete a vibration in a tiny fraction of a second, not in \(2\pi\) seconds. What stays fixed, no matter the wheel or the fork, is the wave's <strong>self-government</strong> &mdash; it will keep whatever rate you set for it, without fail, forever. Today's three parameters let you set that rate to match something real, while the wave itself keeps its own law exactly as reliably as before.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Three Parameters, Three Separate Jobs</strong></h4>
+        <p>For \(y = A\sin(Bx) + D\) (and identically for cosine in place of sine):</p>
+        <p style="text-align: center;">Amplitude \(= |A| \qquad\) Period \(= \dfrac{2\pi}{|B|} \qquad\) Midline: \(y = D\)</p>
+        <p>Each parameter answers one question and only one. \(A\) answers <em>how far</em> the wave reaches above and below its resting line &mdash; and if \(A\) is negative, it also answers whether the wave is flipped, opening downward where the parent wave opens upward. \(B\) answers <em>how often</em> the wave repeats: a larger \(|B|\) crowds more cycles into the same stretch of the \(x\)-axis (compression), a smaller \(|B|\) stretches one cycle out over more of it. \(D\) answers <em>where</em> the wave rests vertically, sliding the entire graph &mdash; peaks, troughs, and midline alike &mdash; up or down by \(D\) units. None of the three can answer another's question; changing \(D\) never changes how far the wave reaches, and changing \(A\) never changes how often it repeats.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>State the amplitude, period, and midline of \(y = 3\sin(2x)\), then build a table of values across one full period.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Amplitude \(=|3|=3\). Period \(=\dfrac{2\pi}{2}=\pi\). Midline: \(y=0\) (no \(D\) term). One period runs from \(x=0\) to \(x=\pi\):</p>
+    <p style="text-align: center;">\(x=0:\ 3\sin(0)=0 \qquad x=\tfrac{\pi}{4}:\ 3\sin\left(\tfrac{\pi}{2}\right)=3(1)=3 \qquad x=\tfrac{\pi}{2}:\ 3\sin(\pi)=0\)</p>
+    <p style="text-align: center;">\(x=\tfrac{3\pi}{4}:\ 3\sin\left(\tfrac{3\pi}{2}\right)=3(-1)=-3 \qquad x=\pi:\ 3\sin(2\pi)=0\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Amplitude \(3\), period \(\pi\), midline \(y=0\). The wave rises to \(3\), falls to \(-3\), and completes the whole trip in only \(\pi\) units &mdash; half the parent wave's period, because doubling \(B\) doubles how fast the input "uses up" one lap of the circle.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>State the amplitude, period, and midline of \(y = -2\cos\left(\dfrac{x}{2}\right) + 1\), and find its range.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Amplitude \(=|-2|=2\). Period \(=\dfrac{2\pi}{1/2}=4\pi\). Midline: \(y=1\). Because \(A=-2\) is negative, the graph is reflected: it starts at a <em>minimum</em> where the parent cosine would start at a maximum.</p>
+    <p style="text-align: center;">\(x=0:\ -2\cos(0)+1=-2(1)+1=-1\ \text{(minimum)} \qquad x=2\pi:\ -2\cos(\pi)+1=-2(-1)+1=3\ \text{(maximum)}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Range \([-1,3]\), matching midline \(\pm\) amplitude: \(1\pm2\). The graph completes one full, reflected cycle over the unusually long stretch of \(4\pi\) units, because dividing the input by \(2\) stretches the wave horizontally instead of compressing it.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>A sinusoidal graph has a maximum of \(7\), a minimum of \(-1\), and a period of \(\dfrac{\pi}{3}\). Assuming it is a sine function with no phase shift, write its equation.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Midline is the average of the max and min: \(D = \dfrac{7+(-1)}{2} = 3\). Amplitude is half the distance between them: \(A = \dfrac{7-(-1)}{2} = 4\). Solve the period formula for \(B\):</p>
+    <p style="text-align: center;">\(\dfrac{2\pi}{B} = \dfrac{\pi}{3} \;\;\Rightarrow\;\; B = 2\pi \cdot \dfrac{3}{\pi} = 6\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(y = 4\sin(6x) + 3\). Check: this predicts a maximum of \(4(1)+3=7\) and a minimum of \(4(-1)+3=-1\) &mdash; both match the given graph.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Concert pitch A vibrates at \(440\) cycles every second (\(440\) hertz). If a point on the tuning fork swings with amplitude \(0.02\) mm about its resting position, model its displacement \(y\) (in mm) as a function of time \(t\) (in seconds).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Completing \(440\) cycles per second means one cycle takes \(\dfrac{1}{440}\) second &mdash; that is the period. Amplitude is given directly as \(0.02\) mm, and the fork rests at \(y=0\), so \(D=0\).</p>
+    <p style="text-align: center;">\(\dfrac{2\pi}{B} = \dfrac{1}{440} \;\;\Rightarrow\;\; B = 2\pi(440) = 880\pi\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(y = 0.02\sin(880\pi t)\). The parameter \(B\) is doing exactly the job Fourier's insight depends on: a musical pitch <em>is</em> a period, and \(880\pi\) is what it costs, in this equation, to vibrate four hundred forty times every single second without ever missing a beat.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#129405; Your VR Session: The Wave Machine</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">25 min</span></h4>
+        <p><strong>What you're doing.</strong> Lesson 6-5's Session let you walk a coordinate onto a wall graph one step at a time. This Session extends it: a rotating-arm mechanism &mdash; a crank of fixed radius, spinning about a fixed hub &mdash; traces a sine wave onto a moving wall graph in real time as it turns, exactly the way your own height traced one when you walked the circle in Unit 6. Before each of three runs, you predict on a whiteboard what changing one setting will do to the traced wave; then you run the preset and check your prediction against what the wall graph actually draws.</p>
+        <p><strong>What you'll need.</strong> Your VR headset (preferred) or the ENGAGE desktop app; read this lesson's Exploring the Math section first, so the words "amplitude," "period," and "midline" already mean something concrete before you test them.</p>
+        <p><strong>How to join.</strong></p>
+        <ul>
+            <li><strong>Session type:</strong> solo, persistent &mdash; your sticky-note predictions and outcomes remain if you return.</li>
+            <li><strong>Session ID:</strong> posted beside this lesson in the Canvas module.</li>
+            <li><strong>Location:</strong> Wave Machine Workshop.</li>
+            <li><strong>On arrival:</strong> you spawn facing the rotating-arm mechanism, with a whiteboard at your left holding the three preset names and today's first instruction, and the wall graph directly opposite, blank and waiting.</li>
+        </ul>
+        <p><strong>What to do, in order.</strong></p>
+        <ol>
+            <li>Read the whiteboard's overview, then write your first prediction on it: if the arm's <em>radius</em> doubles, what will happen to how far the traced wave reaches above and below its resting line?</li>
+            <li>Run the <strong>double radius</strong> preset. Watch the wall graph trace a full cycle, then sticky-note the actual outcome next to your prediction &mdash; confirmed, or corrected.</li>
+            <li>Predict again: if the arm's <em>rotation speed</em> doubles (it turns twice as fast), what will happen to how quickly the wave repeats?</li>
+            <li>Run the <strong>double speed</strong> preset and sticky-note the outcome next to this second prediction.</li>
+            <li>Predict a third time: if the arm's <em>hub</em> is raised, what will happen to the wave's resting height?</li>
+            <li>Run the <strong>raise hub</strong> preset and sticky-note the outcome next to this third prediction.</li>
+            <li>Run one full, undisturbed cycle at the default settings. As the wall graph traces it, place three new sticky notes directly on the curve, labeling where you can see \(A\) (the peak height above the resting line), \(B\)'s effect (the horizontal distance the wave takes to repeat), and \(D\) (the resting line itself).</li>
+            <li>Start a spatial recording and narrate, in thirty to sixty seconds, how the rotating arm's motion connects to the equation \(y = A\sin(Bx) + D\) &mdash; then stop the recording.</li>
+            <li>Take a snapshot of the whiteboard showing all three predictions beside their actual outcomes.</li>
+        </ol>
+        <p style="margin-bottom: 0;"><strong>What to submit.</strong> Your <strong>whiteboard predictions-vs-outcomes snapshot</strong>, included as a page in your Assignment 7-2 PDF, with the shareable link to your narrated spatial recording pasted on that same page. About 25 minutes in-headset.</p>
+    </div>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; On Your Calculator: Sliders for A, B, and D</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), type <strong>y = A sin(Bx) + D</strong>. Desmos will offer to create sliders for \(A\), \(B\), and \(D\) automatically &mdash; accept all three. Drag each slider one at a time, watching which feature of the graph moves: \(A\) changes only the height of the peaks and troughs; \(B\) changes only how tightly the waves are packed; \(D\) changes only how high the whole wave sits. Set \(A=4\), \(B=6\), \(D=3\) and confirm the graph matches Example 3's predicted maximum of \(7\) and minimum of \(-1\) exactly.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: State the amplitude, period, and midline of \(y = 6\cos(4x) - 5\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            Amplitude \(=|6|=6\); period \(=\frac{2\pi}{4}=\frac{\pi}{2}\); midline \(y=-5\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A sinusoidal graph has maximum \(4\), minimum \(0\), and period \(4\pi\). Assuming a sine function with no phase shift, write its equation.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(D = \frac{4+0}{2}=2\); \(A=\frac{4-0}{2}=2\); \(\frac{2\pi}{B}=4\pi \Rightarrow B=\frac{1}{2}\). Equation: \(y = 2\sin\left(\frac{x}{2}\right)+2\).
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Writing "amplitude \(= A\)" instead of "amplitude \(= |A|\)," and forgetting that a negative \(A\) still reports a positive amplitude &mdash; the size of the reach can never be negative, even when the wave is flipped. A second common slip: applying the period formula backward, treating a <em>larger</em> \(B\) as producing a <em>longer</em> period. Because \(B\) sits in the denominator of \(\frac{2\pi}{B}\), a larger \(|B|\) always produces a <em>shorter</em> period (the wave repeats faster), and a \(B\) between \(0\) and \(1\) always produces a <em>longer</em> one.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The unit "hertz" &mdash; one cycle per second &mdash; honors <strong>Heinrich Hertz</strong>, who in 1887 was the first to conclusively generate and detect radio waves in a laboratory, confirming James Clerk Maxwell's prediction that light itself is an electromagnetic wave. Frequency and period are simply reciprocals of each other, \(f = \frac{1}{\text{period}}\), which is exactly why Example 4's \(440\) hertz tuning fork produced a period of \(\frac{1}{440}\) second &mdash; the same relationship silently sitting inside every radio station's dial number.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Three parameters, three separate jobs: \(A\) for reach, \(B\) for rate, \(D\) for resting height. You can now build a sine or cosine wave to match a wheel, a tide table, or a tuning fork's exact pitch &mdash; and in the Wave Machine, you watched a physical crank obey those same three parameters without being told to. One control is still missing, and it is the one every one of today's graphs quietly assumed away: every wave you built today started its cycle exactly at \(x=0\), the way the crank always started its swing from the same resting position. Real waves rarely cooperate that neatly &mdash; a tide is high at 6 a.m., not at midnight. Tomorrow's lesson gives the wave permission to start its cycle wherever the real world actually starts it.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why do \(A\), \(B\), and \(D\) each answer a completely different question about a sinusoidal graph, such that changing one never affects what another controls?</p>
+    <p>2. Why does amplitude have to be written as \(|A|\) rather than \(A\), and what does a negative \(A\) actually do to the graph if not change how far it reaches?</p>
+    <p>3. Why does a larger value of \(B\) produce a <em>shorter</em> period rather than a longer one?</p>
+    <p>4. In the Wave Machine, which of the three settings you tested changed the wave's shape, and which only changed where it sat &mdash; and how does that distinction map onto \(A\), \(B\), and \(D\)?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">7-2 &middot; Amplitude, Period, and Midline</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

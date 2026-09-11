@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 7-13</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 7</div>
+        <div style="font-size: 13px; color: #666;">Trigonometric Functions</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">7-13</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Trigonometric Functions</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">7-13</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Simplifying and Verifying Identities</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to verify a trigonometric identity by transforming one side alone &mdash; never both sides at once &mdash; until it matches the other side exactly.</p></li>
+        <li><p>I will be able to simplify a trigonometric expression to its simplest equivalent form using the reciprocal, quotient, and Pythagorean identities.</p></li>
+        <li><p>I will be able to name the fallacy of assuming the conclusion (begging the question) when a "proof" manipulates both sides of an unproven equation at once &mdash; whether the proof is mine, a classmate's, or an AI's.</p></li>
+        <li><p>I will be able to choose a productive first move &mdash; converting to sine and cosine, multiplying by a conjugate form of \(1\), or splitting a fraction &mdash; when an identity resists the obvious approach.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Identity</strong>: An equation between two trigonometric expressions that is true for every value of the variable where both sides are defined &mdash; not just for a few special values, the way an ordinary equation might be.</p>
+    <p><strong>Verifying an identity</strong>: Demonstrating that an identity holds by transforming <em>one side alone</em>, using known identities and legal algebra, until it matches the other side exactly &mdash; never operating on both sides at once.</p>
+    <p><strong>Simplifying a trigonometric expression</strong>: Rewriting an expression as an equivalent one with fewer terms or a single named function, usually by converting everything to sine and cosine first.</p>
+    <p><strong>Begging the question (circular reasoning)</strong>: A logical fallacy in which an argument's conclusion is smuggled into its own premises &mdash; so the "proof" never actually establishes anything the reader did not already have to grant at the start.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Lesson 7-12 proved that \(\sin^2\theta + \cos^2\theta = 1\) and its two companions hold for every angle, not just the special ones &mdash; and it proved them properly, from the unit circle outward, never assuming the very fact being established. Today that discipline becomes a general habit. An identity is a promise that two expressions describe the same quantity everywhere both are defined, and honoring that promise takes a specific kind of self-restraint: you may transform <em>one side</em> of the page as much as you like, but the moment you touch both sides of an unproven equation in the same step, you have quietly assumed the two sides were already equal &mdash; which is the one thing a proof is not allowed to assume. This is self-government in its most literal classroom form: not "don't cheat," but "don't let the shortcut that would make this easy be the one move that secretly begs the question."</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The One-Side Rule</strong></h4>
+        <p>To <strong>verify</strong> an identity, pick the side that looks more complicated (usually) and rewrite it &mdash; using reciprocal, quotient, and Pythagorean identities, and ordinary algebra (factoring, combining fractions, multiplying by a clever form of \(1\)) &mdash; until it becomes, exactly, the other side. The other side is never touched. To <strong>simplify</strong> an expression with no claimed equal side at all, the same toolbox applies: convert everything to sine and cosine first, then look for cancellation.</p>
+        <p style="margin-bottom: 0;">Why the restriction matters: an <em>equation</em> (like \(2x+1=7\)) is an open question &mdash; you may operate on both sides to find which \(x\) makes it true. An <em>identity</em> is a closed claim, already asserted to be true for every allowed input. Treating it like an equation &mdash; cross-multiplying, squaring both sides, adding the same thing to both sides &mdash; only shows that <em>if</em> the identity holds, some other true statement follows. It never shows the identity itself holds. That gap is exactly where this lesson's checkpoint lives.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Simplify \(\sin\theta \cot\theta\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Convert to sine and cosine first &mdash; the reliable opening move. Since \(\cot\theta = \dfrac{\cos\theta}{\sin\theta}\):</p>
+    <p style="text-align: center;">\(\sin\theta\cot\theta = \sin\theta\cdot\dfrac{\cos\theta}{\sin\theta} = \cos\theta\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\cos\theta\). The \(\sin\theta\) factors cancel &mdash; legal because we are transforming a single expression, not an equation, so nothing about "both sides" applies here at all.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Verify: \(\sec x - \cos x = \sin x\tan x\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The left side has more structure, so transform it alone. Convert to cosine, then combine over a common denominator:</p>
+    <p style="text-align: center;">\(\sec x - \cos x = \dfrac{1}{\cos x} - \cos x = \dfrac{1-\cos^2 x}{\cos x}\)</p>
+    <p>By the Pythagorean identity, \(1-\cos^2x = \sin^2x\):</p>
+    <p style="text-align: center;">\(=\dfrac{\sin^2 x}{\cos x} = \sin x\cdot\dfrac{\sin x}{\cos x} = \sin x\tan x\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The left side now reads exactly as the right side, \(\sin x\tan x\) &mdash; verified. The right side was never touched.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Verify: \(\dfrac{1+\cos\theta}{\sin\theta} = \dfrac{\sin\theta}{1-\cos\theta}\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Transform the left side only, by multiplying it by a conjugate form of \(1\) &mdash; a legal move because multiplying anything by \(\dfrac{1-\cos\theta}{1-\cos\theta}\) does not change its value:</p>
+    <p style="text-align: center;">\(\dfrac{1+\cos\theta}{\sin\theta}\cdot\dfrac{1-\cos\theta}{1-\cos\theta} = \dfrac{(1+\cos\theta)(1-\cos\theta)}{\sin\theta(1-\cos\theta)} = \dfrac{1-\cos^2\theta}{\sin\theta(1-\cos\theta)}\)</p>
+    <p>By the Pythagorean identity, \(1-\cos^2\theta=\sin^2\theta\), so the fraction becomes:</p>
+    <p style="text-align: center;">\(\dfrac{\sin^2\theta}{\sin\theta(1-\cos\theta)} = \dfrac{\sin\theta}{1-\cos\theta}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The left side now matches the right side exactly &mdash; verified, with the right side never once touched. Numerically, at \(\theta=60^\circ\): left side \(=\dfrac{1+0.5}{0.8660}\approx1.7321\); right side \(=\dfrac{0.8660}{1-0.5}\approx1.7321\). They agree &mdash; and notice this identity is exactly the one the checkpoint below borrows.</p>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE PROOF THAT ASSUMES ITSELF</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student asked an AI to verify Example 3's identity, \(\dfrac{1+\cos\theta}{\sin\theta} = \dfrac{\sin\theta}{1-\cos\theta}\). It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;Cross-multiply both sides: \((1+\cos\theta)(1-\cos\theta) = \sin\theta\cdot\sin\theta\). Expand: \(1-\cos^2\theta = \sin^2\theta\). This is true by the Pythagorean identity, so the original identity is verified.&rdquo;</p>
+            <p>Every line of arithmetic is correct &mdash; and the conclusion happens to be true &mdash; but the <em>method</em> is invalid, and it is invalid in a way arithmetic checking can never catch. Cross-multiplying an equation is only a legal move when you already know both sides are equal (or you are solving for an unknown and will check the solution afterward); here, "both sides are equal" is the very claim on trial. The AI operated on both sides simultaneously, which quietly assumes what it needed to prove &mdash; the fallacy of <strong>begging the question (assuming the conclusion)</strong>. Reaching a true statement (\(1-\cos^2\theta=\sin^2\theta\)) at the end does not rescue the argument: <em>if</em> the identity holds, that true statement must follow &mdash; but plenty of <em>false</em> identities would also lead to a true statement after cross-multiplying, so arriving at one proves nothing about where you started.</p>
+            <p style="margin-bottom: 0;">The disciplined fix is Example 3 above: transform the left side alone, using a legal move (multiplying by a conjugate form of \(1\), which changes nothing about the left side's value), until it becomes the right side &mdash; which is never touched. Same true identity, same true Pythagorean fact buried inside it &mdash; but only one of the two arguments actually earns the conclusion. Before accepting any identity "proof" &mdash; yours, a classmate's, or an AI's &mdash; ask exactly one question: did this argument ever perform the same operation on both sides of the thing it was trying to prove?</p>
+        </div>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Simplify \(\tan x + \cot x\) to a single named function or product.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">\(\tan x+\cot x = \dfrac{\sin x}{\cos x}+\dfrac{\cos x}{\sin x} = \dfrac{\sin^2x+\cos^2x}{\sin x\cos x} = \dfrac{1}{\sin x\cos x}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\dfrac{1}{\sin x\cos x}\), which can also be written \(\csc x\sec x\) since \(\dfrac{1}{\sin x}\cdot\dfrac{1}{\cos x}=\csc x\sec x\). Notice the Pythagorean identity appeared again, uninvited, the moment everything was rewritten in sine and cosine &mdash; that identity is the single most useful tool in this entire lesson.</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Verify: \(\dfrac{\cos x}{1+\sin x} = \dfrac{1-\sin x}{\cos x}\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Transform the left side by multiplying by the conjugate form of \(1\), \(\dfrac{1-\sin x}{1-\sin x}\):</p>
+    <p style="text-align: center;">\(\dfrac{\cos x}{1+\sin x}\cdot\dfrac{1-\sin x}{1-\sin x} = \dfrac{\cos x(1-\sin x)}{1-\sin^2x} = \dfrac{\cos x(1-\sin x)}{\cos^2x} = \dfrac{1-\sin x}{\cos x}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The left side now reads exactly as the right side &mdash; verified. Check at \(x=30^\circ\): left side \(=\dfrac{0.8660}{1.5}\approx0.5774\); right side \(=\dfrac{0.5}{0.8660}\approx0.5774\). Matches.</p>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Verify \(\tan\theta\cos\theta = \sin\theta\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\tan\theta\cos\theta = \dfrac{\sin\theta}{\cos\theta}\cdot\cos\theta = \sin\theta\). The right side, \(\sin\theta\), was never touched.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Simplify \(\dfrac{1-\sin^2x}{\cos x}\) (assume \(\cos x\ne0\)).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            By the Pythagorean identity, \(1-\sin^2x=\cos^2x\), so \(\dfrac{1-\sin^2x}{\cos x}=\dfrac{\cos^2x}{\cos x}=\cos x\).
+        </div>
+    </details>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128064; What "Never Touch the Other Side" Actually Buys You</strong></h4>
+        <p style="margin-bottom: 0;">If both sides could be touched, <em>any</em> claimed identity could be pushed toward "true" &mdash; cross-multiply, expand, and you will often land on some real Pythagorean fact, whether or not the original claim was ever correct. Restricting yourself to one side is not a bureaucratic rule; it is the only thing standing between "I verified this identity" and "I performed some arithmetic that felt related to this identity." That distinction is the entire content of today's virtue.</p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Writing the identity you are trying to prove at the top of your page, then performing the <em>same</em> operation to both sides, line after line, until you reach something true &mdash; and calling that a proof. This is not only an AI's mistake; it is the single most common habit students bring from solving equations, where operating on both sides is exactly the right move. An identity is not an equation to be solved; it is a claim to be verified, and verifying it means moving only one side of the page at a time.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Every identity in this lesson traced back to the same short list from 7-12 &mdash; the reciprocal, quotient, and Pythagorean identities &mdash; applied with one rule enforced without exception: transform one side, leave the other alone, and never let the goal itself become a tool in the proof. That is what self-government looks like inside an algebra step, not just inside a life. Next lesson turns from a single angle's identities to <em>two</em> angles at once: the sum and difference formulas, which let you find the exact value of an angle like \(15^\circ\) that no unit-circle seed ever gave you directly &mdash; and which, as it happens, were first hidden inside a theorem about circles nearly two thousand years ago.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why is it legal to operate on both sides of an equation you are solving, but not legal to operate on both sides of an identity you are trying to verify?</p>
+    <p>2. In Example 3 and Example 5, what made multiplying by a "conjugate form of 1" a legitimate move, when cross-multiplying the same identity was not?</p>
+    <p>3. The AI's cross-multiplication reached a true statement. Why does reaching a true statement not prove the argument that led there was valid?</p>
+    <p>4. What does this lesson's one-side rule have to do with the unit's virtue of self-government?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">7-13 &middot; Simplifying and Verifying Identities</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

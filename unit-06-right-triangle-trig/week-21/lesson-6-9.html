@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 6-9</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 6</div>
+        <div style="font-size: 13px; color: #666;">Right Triangle Trigonometry</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">6-9</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Right Triangle Trigonometry</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">6-9</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Evaluating in Any Quadrant: Reference Angles, Identities, Technology</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to find the reference angle for any angle and use it, together with a sign check on the quadrant, to evaluate all six trigonometric functions exactly.</p></li>
+        <li><p>I will be able to choose deliberately among unit-circle recall, reference-angle reasoning, and calculator technology &mdash; whichever tool actually fits the angle in front of me.</p></li>
+        <li><p>I will be able to check a calculator's mode (degrees vs. radians) and audit its output for reasonableness before I trust it.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Reference angle</strong>: The acute angle formed between an angle's terminal side and the nearest arm of the \(x\)-axis. It is always between \(0^\circ\) and \(90^\circ\) (or \(0\) and \(\pi/2\)), and it is the bridge back to the first-quadrant values you already know.</p>
+    <p><strong>ASTC (sign pattern)</strong>: The quadrant-by-quadrant record of which functions are positive &mdash; <strong>A</strong>ll (QI), <strong>S</strong>ine and its reciprocal (QII), <strong>T</strong>angent and its reciprocal (QIII), <strong>C</strong>osine and its reciprocal (QIV). It is not folklore; it falls directly out of the signs of \(x\) and \(y\) in each quadrant.</p>
+    <p><strong>Mode</strong>: The calculator's setting for how it interprets a bare number typed into a trig function &mdash; as degrees or as radians. The single most common way a correct keystroke produces an incorrect answer.</p>
+    <p><strong>Coterminal angle</strong> <em>(review from 6-2)</em>: An angle sharing the same terminal side as another, differing by a whole number of full rotations. Reference angles are found from an angle's position in \([0^\circ, 360^\circ)\) or \([0, 2\pi)\) &mdash; reduce to a coterminal angle in that range first if you need to.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>When Hipparchus built the first trigonometric table around 150 BC, he did not compute a separate chord length for every angle from \(0^\circ\) to \(360^\circ\). He didn't need to. A circle repeats itself with a fourfold symmetry, and Hipparchus &mdash; like every trigonometer since &mdash; understood that the values in one quarter of the circle secretly determine the values everywhere else. What changes from quadrant to quadrant is never the <em>size</em> of the ratio, only its <em>sign</em>. Learn to read both, and a single first-quadrant triangle unlocks the entire circle. That is the whole content of today's lesson, and it is also, not by coincidence, the discipline every reliable calculator and every honest AI tutor is silently supposed to be running underneath its own keystrokes.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Reference-Angle Method</strong></h4>
+        <p>To evaluate any trig function of any angle \(\theta\), reduce to a coterminal angle in \([0^\circ, 360^\circ)\), find its quadrant, and build the reference angle \(\theta_R\):</p>
+        <ul>
+            <li><strong>Quadrant I:</strong> \(\theta_R = \theta\)</li>
+            <li><strong>Quadrant II:</strong> \(\theta_R = 180^\circ - \theta\) &nbsp;(or \(\pi - \theta\))</li>
+            <li><strong>Quadrant III:</strong> \(\theta_R = \theta - 180^\circ\) &nbsp;(or \(\theta - \pi\))</li>
+            <li><strong>Quadrant IV:</strong> \(\theta_R = 360^\circ - \theta\) &nbsp;(or \(2\pi - \theta\))</li>
+        </ul>
+        <p>Then: <strong>evaluate the function at \(\theta_R\)</strong> &mdash; a first-quadrant angle you already know &mdash; and <strong>attach the sign</strong> that ASTC assigns to that function in \(\theta\)'s actual quadrant. The reference angle supplies the number; the quadrant supplies the sign. Confuse the two jobs and you will get either the wrong magnitude or the wrong sign &mdash; never both wrong at once, which is exactly why the mistake is so easy to miss.</p>
+        <p style="margin-bottom: 0;"><strong>ASTC</strong>, quadrant by quadrant &mdash; the mnemonic sentence is &ldquo;All Students Take Calculus,&rdquo; one letter per quadrant, going counterclockwise from QI: <strong>A</strong>ll positive (QI) &middot; <strong>S</strong>ine (and cosecant) positive (QII) &middot; <strong>T</strong>angent (and cotangent) positive (QIII) &middot; <strong>C</strong>osine (and secant) positive (QIV). Everywhere the mnemonic does not name a function, that function is negative.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Evaluate all six trigonometric functions of \(\theta = 210^\circ\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(210^\circ\) lies between \(180^\circ\) and \(270^\circ\): Quadrant III. Reference angle: \(\theta_R = 210^\circ - 180^\circ = 30^\circ\). In QIII, ASTC assigns positive signs only to tangent and cotangent; sine, cosine, cosecant, and secant are negative.</p>
+    <p style="text-align: center;">\(\sin 210^\circ = -\sin 30^\circ = -\dfrac{1}{2} \qquad \cos 210^\circ = -\cos 30^\circ = -\dfrac{\sqrt{3}}{2} \qquad \tan 210^\circ = +\tan 30^\circ = \dfrac{\sqrt{3}}{3}\)</p>
+    <p style="text-align: center;">\(\csc 210^\circ = -2 \qquad \sec 210^\circ = -\dfrac{2\sqrt{3}}{3} \qquad \cot 210^\circ = \sqrt{3}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Verify the sign discipline directly: \(\tan 210^\circ = \dfrac{\sin 210^\circ}{\cos 210^\circ} = \dfrac{-1/2}{-\sqrt{3}/2} = \dfrac{1}{\sqrt{3}} = \dfrac{\sqrt{3}}{3}\) &mdash; positive, exactly as ASTC promised for QIII, because a negative divided by a negative is positive. The reference angle \(30^\circ\) never changes; only which functions get the minus sign changes.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>Evaluate all six trigonometric functions of \(\theta = \dfrac{5\pi}{4}\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(\dfrac{5\pi}{4}\) lies between \(\pi\) and \(\dfrac{3\pi}{2}\): Quadrant III. Reference angle: \(\theta_R = \dfrac{5\pi}{4} - \pi = \dfrac{\pi}{4}\).</p>
+    <p style="text-align: center;">\(\sin \dfrac{5\pi}{4} = -\dfrac{\sqrt{2}}{2} \qquad \cos \dfrac{5\pi}{4} = -\dfrac{\sqrt{2}}{2} \qquad \tan \dfrac{5\pi}{4} = 1\)</p>
+    <p style="text-align: center;">\(\csc \dfrac{5\pi}{4} = -\sqrt{2} \qquad \sec \dfrac{5\pi}{4} = -\sqrt{2} \qquad \cot \dfrac{5\pi}{4} = 1\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Notice that sine and cosine came out <em>equal</em> here &mdash; both \(-\frac{\sqrt2}{2}\) &mdash; which is exactly what makes \(\pi/4\) special: the two legs of its reference triangle are equal. That equality survives the sign change because both received the <em>same</em> sign in QIII, so their ratio, \(\tan\), came out positive and equal to \(1\), just as it does at \(\pi/4\) itself.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Evaluate \(\sec 300^\circ\) without a calculator.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(300^\circ\) lies between \(270^\circ\) and \(360^\circ\): Quadrant IV. Reference angle: \(\theta_R = 360^\circ - 300^\circ = 60^\circ\). In QIV, cosine and secant are positive.</p>
+    <p style="text-align: center;">\(\cos 300^\circ = +\cos 60^\circ = \dfrac{1}{2} \;\;\Rightarrow\;\; \sec 300^\circ = \dfrac{1}{\cos 300^\circ} = 2\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\sec 300^\circ = 2\). You did not need all six functions today &mdash; only the one asked for, and only the one reference angle it required. Reaching for the whole circle when the question asks for one value is wasted motion; reach for exactly what the problem needs.</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>Evaluate \(\sin(-60^\circ)\), \(\cos(-60^\circ)\), and \(\tan(-60^\circ)\) two ways: by reference angle, and by the even/odd symmetry of the functions.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>By reference angle:</strong> \(-60^\circ\) is coterminal with \(300^\circ\) (add \(360^\circ\)), which sits in QIV with reference angle \(60^\circ\). QIV: cosine positive, sine and tangent negative.</p>
+    <p style="text-align: center;">\(\sin(-60^\circ) = -\dfrac{\sqrt{3}}{2} \qquad \cos(-60^\circ) = \dfrac{1}{2} \qquad \tan(-60^\circ) = -\sqrt{3}\)</p>
+    <p><strong>By even/odd symmetry:</strong> cosine is an even function (\(\cos(-\theta) = \cos\theta\)) and sine and tangent are odd (\(\sin(-\theta) = -\sin\theta\), \(\tan(-\theta) = -\tan\theta\)) &mdash; a direct consequence of reflecting a point across the \(x\)-axis. So \(\cos(-60^\circ) = \cos 60^\circ = \frac{1}{2}\), \(\sin(-60^\circ) = -\sin 60^\circ = -\frac{\sqrt3}{2}\), \(\tan(-60^\circ) = -\tan 60^\circ = -\sqrt3\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\sin(-60^\circ) = -\frac{\sqrt3}{2}\), \(\cos(-60^\circ) = \frac{1}{2}\), \(\tan(-60^\circ) = -\sqrt3\) &mdash; both roads arrive at the same three numbers. Even/odd symmetry is not a separate fact to memorize; it is the reference-angle method's own conclusion, restated for the special case of a negative angle.</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>Use a calculator to evaluate \(\cot(2.3)\), where \(2.3\) is measured in <strong>radians</strong>. Then show what goes wrong if the calculator is left in degree mode.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Step 1 &mdash; hand-check the order of magnitude before you touch the calculator.</strong> \(2.3\) radians is between \(\pi/2 \approx 1.571\) and \(\pi \approx 3.142\): Quadrant II. Reference angle \(\approx \pi - 2.3 = 0.842\) radians \(\approx 48.2^\circ\). In QII, cotangent (cosine over sine) is negative, and \(\cot 48^\circ\) is a modest number near \(0.9\) &mdash; so the true answer should be a negative number with magnitude close to \(1\), not a huge number and not a positive one.</p>
+    <p><strong>Step 2 &mdash; set the mode to radians and compute:</strong> \(\cot(2.3) = \dfrac{\cos(2.3)}{\sin(2.3)} \approx \dfrac{-0.6663}{0.7457} \approx -0.894\). This matches the hand-check exactly: negative, and close to \(1\) in size.</p>
+    <p><strong>Step 3 &mdash; show the failure mode.</strong> If the calculator were mistakenly left in <em>degree</em> mode, it would compute \(\cot(2.3^\circ)\) instead &mdash; a tiny angle barely off the positive \(x\)-axis, where cotangent is a large <em>positive</em> number: \(\cot(2.3^\circ) \approx 24.90\).</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\cot(2.3) \approx -0.894\) in the correct (radian) mode. The wrong-mode answer, \(24.90\), is not just numerically different &mdash; it has the wrong sign and is off by a factor of nearly \(30\), and the Step 1 hand-check would have caught it instantly. That one-line estimate, done <em>before</em> you press a button, is the whole defense against a mode error.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Choosing Your Tool</strong></h4>
+        <p>Three tools solve the same class of problem; a mathematician chooses on purpose, not by habit.</p>
+        <ul>
+            <li><strong>Unit-circle recall</strong> &mdash; for special angles (multiples of \(30^\circ\), \(45^\circ\), \(60^\circ\)): fastest, and exact.</li>
+            <li><strong>Reference-angle reasoning</strong> &mdash; for any angle built from a special angle, or when you need an <em>exact</em> value (a radical, not a decimal) at a non-special-looking angle that still reduces to one.</li>
+            <li><strong>Calculator technology</strong> &mdash; for genuinely non-special angles, where no exact radical form exists. Set the mode first, hand-estimate the sign and rough size first, then trust the decimal the screen returns.</li>
+        </ul>
+        <p style="margin-bottom: 0;">The discipline is the same across all three: know the quadrant, know the sign, and never accept a number the geometry itself would rule out.</p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE SILENT MODE SWITCH</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">Ask your own AI tutor this week to evaluate several trig values, then verify each one by hand before you trust it &mdash; here is a rehearsal. A student asked an AI to evaluate \(\cos(4)\). It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;cos(4) &asymp; 0.9976.&rdquo;</p>
+            <p>In mathematics, a bare number handed to a trig function &mdash; no degree symbol attached &mdash; means <strong>radians</strong> by convention, always. The AI silently treated \(4\) as \(4^\circ\) instead: \(\cos(4^\circ) \approx 0.9976\), a number close to \(1\), which is exactly what you would expect for an angle barely off the positive \(x\)-axis. But \(4\) radians is about \(229.2^\circ\) &mdash; Quadrant III, reference angle about \(49.2^\circ\), cosine negative there. The true value is \(\cos(4) \approx -0.6536\): negative, and nowhere near \(1\).</p>
+            <p style="margin-bottom: 0;">The AI did not make an arithmetic mistake; it silently assumed the wrong unit and reported a confident, wrong-sign, wrong-size answer with no hedge at all. Before you accept any trig value from a machine &mdash; a calculator or an AI &mdash; ask which unit is in force, and hand-estimate the sign and rough size from the quadrant first. If the machine's answer and your estimate disagree on <em>sign</em>, stop: that disagreement is the mode switch announcing itself.</p>
+        </div>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; In Desmos: Watch the Sign Flip</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">8 min</span></h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), confirm today's examples and rehearse the mode-check habit:</p>
+        <ol>
+            <li>Type <strong>cos(210 &deg;)</strong> and <strong>sin(210&deg;)</strong> &mdash; Desmos accepts the degree symbol directly regardless of its internal mode, which sidesteps the whole mode question. Confirm both match Example 1.</li>
+            <li>Now type <strong>cot(2.3)</strong> with no degree symbol; Desmos defaults to radians, so it should return \(\approx -0.894\), matching Example 5. Then type <strong>cot(2.3&deg;)</strong> and watch the answer jump to \(\approx 24.90\) &mdash; the entire mode failure, made visible in one keystroke.</li>
+            <li>Graph \(y = \cos(x)\) for \(x\) from \(0\) to \(2\pi\) and mark \(x = 4\): read the height of the curve there. It sits well below the axis, near \(-0.65\) &mdash; the picture itself refutes the AI's \(0.9976\) before you compute a single digit.</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Evaluate all six trigonometric functions of \(\theta = 135^\circ\) exactly.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(135^\circ\) is QII, reference angle \(45^\circ\). QII: sine and cosecant positive, the rest negative. \(\sin 135^\circ = \frac{\sqrt2}{2}\), \(\cos 135^\circ = -\frac{\sqrt2}{2}\), \(\tan 135^\circ = -1\), \(\csc 135^\circ = \sqrt2\), \(\sec 135^\circ = -\sqrt2\), \(\cot 135^\circ = -1\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Without a calculator, state the sign (not the value) of \(\tan\left(\frac{7\pi}{5}\right)\), and explain how you know.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\frac{7\pi}{5} = 1.4\pi\), which is between \(\pi\) and \(\frac{3\pi}{2} = 1.5\pi\): Quadrant III. ASTC assigns tangent a positive sign in QIII, so \(\tan\left(\frac{7\pi}{5}\right)\) is <strong>positive</strong> &mdash; determined entirely from the quadrant, with no reference-angle computation needed at all.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Computing the reference angle correctly, finding the right first-quadrant value &mdash; and then forgetting to attach the sign the quadrant actually demands. \(\sin 210^\circ\) is <em>not</em> \(\frac{1}{2}\); the reference angle only ever recovers the <em>magnitude</em> \(\frac{1}{2}\), and ASTC is the separate, mandatory second step that says QIII makes sine negative. Make it a habit to write the quadrant and its sign pattern <em>before</em> you write a single number, so the sign is decided first and the arithmetic can never talk you out of it.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Hipparchus's original table listed chords only from \(0^\circ\) to \(180^\circ\), in half-degree steps &mdash; and that was already enough for every calculation Greek astronomy needed, because the geometry of the circle supplied the rest for free. Three centuries later, Ptolemy's <em>Almagest</em> extended and refined that same table using nothing but a handful of geometric identities &mdash; the ancestors of the very symmetry arguments you used in Example 4. The reference-angle method you learned today is, in substance, over two thousand years old.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>One reference angle, one sign check &mdash; that is the entire machinery for evaluating any trig function at any angle, by hand or by calculator, and it is also the discipline that catches a machine's silent mode switch before it costs you the sign of an answer. Tomorrow you run that same machinery in the opposite direction: instead of evaluating one angle at a time, you will generate the <em>entire</em> unit circle &mdash; all twelve non-axis special angles &mdash; from just three first-quadrant seed values, using exactly the reference-angle-and-ASTC pattern you practiced today.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does the reference-angle method only ever need the first-quadrant values you already know &mdash; what property of the circle guarantees that?</p>
+    <p>2. What is the difference between "the calculator gave a wrong-looking number" and "the calculator was in the wrong mode" &mdash; and what one habit lets you tell them apart before you press a key?</p>
+    <p>3. ASTC is a memory device, but it is not arbitrary. What is actually true about the coordinates \((x, y)\) in each quadrant that makes the mnemonic correct?</p>
+    <p>4. When should you trust unit-circle recall over a calculator, and when should you trust a calculator over your own memory? What decides it?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">6-9 &middot; Evaluating in Any Quadrant: Reference Angles, Identities, Technology</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

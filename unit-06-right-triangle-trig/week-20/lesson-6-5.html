@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 6-5</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 6</div>
+        <div style="font-size: 13px; color: #666;">Right Triangle Trigonometry</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">6-5</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Right Triangle Trigonometry</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">6-5</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">The Unit Circle: Sine and Cosine</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to define the unit circle and locate the terminal point \((\cos\theta, \sin\theta)\) for any real-number angle \(\theta\), measured as a rotation from the positive \(x\)-axis.</p></li>
+        <li><p>I will be able to explain why defining sine and cosine as coordinates <em>extends</em> Lesson 6-3's right-triangle ratios beyond the acute angles of a triangle to every real number.</p></li>
+        <li><p>I will be able to use the Pythagorean relation \(\cos^2\theta + \sin^2\theta = 1\) and the circle's symmetry to find a missing coordinate and reason about the sign of sine and cosine in each quadrant.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Unit circle</strong>: The circle of radius 1 centered at the origin, \(x^2 + y^2 = 1\). Today it becomes the home address of sine and cosine.</p>
+    <p><strong>Standard position</strong>: An angle drawn with its vertex at the origin and its initial side along the positive \(x\)-axis, opening counterclockwise for positive \(\theta\) and clockwise for negative \(\theta\).</p>
+    <p><strong>Terminal point</strong>: The point \(P(\theta)\) where an angle's terminal side meets the unit circle. Today's definition: \(P(\theta) = (\cos\theta, \sin\theta)\) &mdash; cosine <em>is</em> the \(x\)-coordinate, sine <em>is</em> the \(y\)-coordinate.</p>
+    <p><strong>Quadrantal angle</strong>: An angle whose terminal side lies exactly on an axis &mdash; \(0\), \(\frac{\pi}{2}\), \(\pi\), \(\frac{3\pi}{2}\), \(2\pi\), and their negatives and repeats.</p>
+    <p><strong>Periodic</strong>: Repeating the same output at regular, fixed intervals of input. Today's preview: winding all the way around the circle (an increase of \(2\pi\)) always returns you to the same point.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Around 140 BC, the Greek astronomer <strong>Hipparchus of Nicaea</strong> needed to predict where the moon would stand against the stars, and the geometry of the sky kept handing him the same shape: a circle, a central angle, and the straight chord connecting the angle's two rays where they cross the circle. So he built the first known trigonometric table &mdash; a table of chord lengths for a whole sequence of angles &mdash; computed once, by hand, and consulted ever after. He had noticed something that took the rest of mathematics centuries to make official: a circle's own coordinates could stand for ratio. That is exactly today's move, and it deserves the unit's virtue of <strong>responsibility</strong> in full: fixing a position on a circle precisely, the way a surveyor or a navigator must, rather than eyeballing it.</p>
+
+    <p>Lesson 6-3 defined sine and cosine as ratios of sides in a right triangle: \(\sin\theta = \frac{\text{opposite}}{\text{hypotenuse}}\), \(\cos\theta = \frac{\text{adjacent}}{\text{hypotenuse}}\). That definition is airtight &mdash; and it is also cornered. A right triangle's other two angles must each be strictly between \(0\) and \(90°\); ask for \(\sin(150°)\) or \(\sin(-40°)\) or \(\sin(700°)\) under that definition and there is no triangle to measure. Surveying, navigation, and (as Unit 7 will show) every periodic motion in nature all need angles that keep going &mdash; past a right angle, past a full turn, backward past zero. The unit circle is where sine and cosine stop being triangle ratios and become <strong>coordinates</strong>, defined for every real number at once.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>The Definition, and Why It Keeps the Old One</strong></h4>
+        <p>Place an angle \(\theta\) in standard position and let its terminal side meet the unit circle at the point \(P(\theta)\). <strong>Define</strong> \(\cos\theta\) to be the \(x\)-coordinate of \(P(\theta)\) and \(\sin\theta\) to be its \(y\)-coordinate:</p>
+        <p style="text-align: center;">\(P(\theta) = (\cos\theta,\ \sin\theta)\)</p>
+        <p>Check that this agrees with Lesson 6-3 whenever a right triangle is available. For an acute \(\theta\) in Quadrant I, drop a perpendicular from \(P(\theta)\) to the \(x\)-axis. That perpendicular, the \(x\)-axis, and the radius to \(P(\theta)\) form a right triangle whose <strong>hypotenuse is the radius &mdash; length 1</strong>. So \(\cos\theta = \frac{\text{adjacent}}{1} = \) adjacent length, and \(\sin\theta = \frac{\text{opposite}}{1} = \) opposite length: the exact same ratios as before, now simply computed against a hypotenuse of 1. Nothing from 6-3 is discarded &mdash; it is the special case of today's definition where an acute triangle happens to be sitting there. What changes is the <strong>domain</strong>: \(\theta\) may now be any real number, because a point can travel around a circle forever, while a triangle's angle cannot.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: The Circle's Equation Is the Identity</strong></h4>
+        <p>Every terminal point lies on the unit circle \(x^2 + y^2 = 1\) by definition &mdash; it is a point <em>on</em> that circle. Substitute \(x = \cos\theta\) and \(y = \sin\theta\) and the circle's own equation becomes a trigonometric law that holds for <strong>every</strong> real number \(\theta\), with no triangle required to justify it:</p>
+        <p style="text-align: center;">\(\cos^2\theta + \sin^2\theta = 1\)</p>
+        <p style="margin-bottom: 0;">Two consequences follow immediately, and both are just the Pythagorean theorem refusing to let a point wander off the circle: \(-1 \le \cos\theta \le 1\) and \(-1 \le \sin\theta \le 1\) for every \(\theta\) &mdash; sine and cosine can never exceed 1 in size, unlike an ordinary triangle's side, which can be as long as you like.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>Find the coordinates \((\cos\theta, \sin\theta)\) for each quadrantal angle: \(\theta = 0\), \(\frac{\pi}{2}\), \(\pi\), \(\frac{3\pi}{2}\), \(2\pi\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Each quadrantal angle lands the terminal side exactly on an axis, so the terminal point is one of the circle's four axis crossings: \((1,0)\), \((0,1)\), \((-1,0)\), \((0,-1)\).</p>
+    <p style="text-align: center;">\(\theta=0: (1,0) \quad \theta=\tfrac{\pi}{2}: (0,1) \quad \theta=\pi: (-1,0) \quad \theta=\tfrac{3\pi}{2}: (0,-1) \quad \theta=2\pi: (1,0)\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\cos 0 = 1,\ \sin 0 = 0\); \(\cos\frac{\pi}{2}=0,\ \sin\frac{\pi}{2}=1\); \(\cos\pi=-1,\ \sin\pi=0\); \(\cos\frac{3\pi}{2}=0,\ \sin\frac{3\pi}{2}=-1\); and \(\theta=2\pi\) returns to \((1,0)\) &mdash; a full turn brings you home, the first sign of periodicity.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>An angle \(\theta\) terminates in Quadrant II with \(\cos\theta = -\frac{3}{5}\). Find \(\sin\theta\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Use \(\cos^2\theta + \sin^2\theta = 1\):</p>
+    <p style="text-align: center;">\(\left(-\dfrac{3}{5}\right)^2 + \sin^2\theta = 1 \;\;\Rightarrow\;\; \sin^2\theta = 1 - \dfrac{9}{25} = \dfrac{16}{25} \;\;\Rightarrow\;\; \sin\theta = \pm\dfrac{4}{5}\)</p>
+    <p>The identity alone cannot choose the sign &mdash; it only knows squares. The quadrant decides: in Quadrant II, \(x\) is negative and \(y\) is positive, so \(\sin\theta\) must be positive.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\sin\theta = \dfrac{4}{5}\). Notice the numbers \(3,4,5\) &mdash; the same Pythagorean triple from ordinary right-triangle work, now scaled onto a hypotenuse of exactly 1.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>Evaluate \(\cos\dfrac{5\pi}{2}\) and \(\sin\dfrac{5\pi}{2}\).</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>\(\dfrac{5\pi}{2}\) is more than one full turn. Subtract \(2\pi\) (one complete revolution) to find the equivalent angle inside \([0, 2\pi)\):</p>
+    <p style="text-align: center;">\(\dfrac{5\pi}{2} - 2\pi = \dfrac{5\pi}{2} - \dfrac{4\pi}{2} = \dfrac{\pi}{2}\)</p>
+    <p>Winding \(\dfrac{5\pi}{2}\) radians around the circle lands on the exact same point as winding just \(\dfrac{\pi}{2}\) radians &mdash; one extra full lap changes nothing about where you end up.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(\cos\dfrac{5\pi}{2} = \cos\dfrac{\pi}{2} = 0\), \(\quad \sin\dfrac{5\pi}{2} = \sin\dfrac{\pi}{2} = 1\).</p>
+
+    <h4><span style="color: #f67a0c;">Example 4</span></h4>
+    <p>A rotation of \(\theta = -\dfrac{\pi}{2}\) means turning clockwise instead of counterclockwise. Find the terminal point.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Negative \(\theta\) simply reverses the direction of travel. Starting at \((1,0)\) and turning <em>clockwise</em> a quarter turn (\(\frac{\pi}{2}\) radians) lands at the bottom of the circle.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> \(P\left(-\frac{\pi}{2}\right) = (0,-1)\), so \(\cos\left(-\frac{\pi}{2}\right) = 0\) and \(\sin\left(-\frac{\pi}{2}\right) = -1\). Compare to \(\theta = \frac{3\pi}{2}\) in Example 1: clockwise a quarter turn and counterclockwise three-quarters of a turn land at the same point &mdash; two different journeys, one destination.</p>
+
+    <h4><span style="color: #f67a0c;">Example 5</span></h4>
+    <p>A student claims the point \((0.5, 0.9)\) could be a terminal point \((\cos\theta, \sin\theta)\) for some angle \(\theta\). Judge the claim.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Any legitimate terminal point must satisfy \(x^2 + y^2 = 1\), since it must lie <em>on</em> the unit circle. Check:</p>
+    <p style="text-align: center;">\((0.5)^2 + (0.9)^2 = 0.25 + 0.81 = 1.06 \ne 1\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The claim is false. \((0.5, 0.9)\) lies slightly <em>outside</em> the unit circle, so no angle \(\theta\) produces it as \((\cos\theta,\sin\theta)\). This is exactly the sanity check worth running before trusting any claimed pair of trig values: square them, add them, and demand 1.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#129405; Your VR Session: Walking the Unit Circle</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">28 min</span></h4>
+        <p><strong>What you're doing.</strong> Every coordinate pair in this lesson has lived on paper. In this Session you walk them. A room-scale circle of radius one is laid on the Location's floor, with sixteen labeled special-angle positions marked around it. You will walk the circle, place each position's coordinate label, and watch a companion wall graph draw \(y = \sin x\) in real time as a marker rises and falls with your own height above the floor. This is the one fact a page cannot hand you as directly as your own legs can: the height of a point traveling around a circle <em>is</em> the sine curve, drawn out over time.</p>
+        <p><strong>What you'll need.</strong> Your VR headset (preferred) or the ENGAGE desktop app; this lesson read first. You have not yet derived the special-angle values &mdash; Lesson 6-6 does that tomorrow &mdash; so a reference card in the Location supplies every coordinate you will place today.</p>
+        <p><strong>How to join.</strong></p>
+        <ul>
+            <li><strong>Session type:</strong> solo, persistent &mdash; your placed labels will still be there if you return.</li>
+            <li><strong>Session ID:</strong> posted beside this lesson in the Canvas module.</li>
+            <li><strong>Location:</strong> Unit Circle Plaza.</li>
+            <li><strong>On arrival:</strong> you spawn at the circle's eastern point (\(\theta = 0\)), beside a whiteboard holding the reference card of all sixteen labeled positions and your first instruction. The wall graph stands opposite, blank and waiting.</li>
+        </ul>
+        <p><strong>What to do, in order.</strong></p>
+        <ol>
+            <li>Read the reference-card whiteboard, then begin walking the circle counterclockwise from \(\theta = 0\).</li>
+            <li>At each of the sixteen labeled positions, place the sticky-note coordinate the reference card gives for that spot. Watch the wall graph as you go: a marker traces \(y = \sin x\) in sync with your height above the floor at each stop.</li>
+            <li>Pause at \(\theta = \frac{\pi}{2}\). Your height above the floor is at its maximum &mdash; exactly 1 &mdash; at the same instant the wall graph's marker reaches its own peak. Sticky-note this observation at that stop.</li>
+            <li>Continue through the back half of the circle (Quadrants II, III, and IV), placing every remaining coordinate and watching the wall graph complete one full wave by the time you return to \(\theta = 2\pi\).</li>
+            <li>Take a snapshot of the completed, fully labeled circle.</li>
+            <li>On the whiteboard, write two or three sentences narrating &mdash; in your own words &mdash; how your height at each stop matched the wall graph's value there, and what happens to both once you pass \(\theta = \pi\).</li>
+            <li>Take a final snapshot of the whiteboard narration.</li>
+        </ol>
+        <p style="margin-bottom: 0;"><strong>What to submit.</strong> One artifact: your <strong>snapshot set</strong> &mdash; the labeled circle and the whiteboard narration &mdash; included as pages in your Assignment 6-5 PDF. About 28 minutes in-headset.</p>
+    </div>
+
+    <div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 16px 20px; margin: 14px 0;">
+        <h4 style="margin-top: 0;">&#128187; In Desmos: Tracing the Point</h4>
+        <p>At <a href="https://www.desmos.com/calculator">desmos.com/calculator</a> (or below), build a live terminal point: type <strong>(cos(t), sin(t))</strong> and add a slider for \(t\) running from \(0\) to \(2\pi\). Drag the slider slowly and watch the point trace the unit circle while the values of \(\cos t\) and \(\sin t\) update in the expression list &mdash; the same coordinates your VR session let you walk. Turn on the point's trace and you will watch the circle draw itself, one \(t\) at a time.</p>
+        <p style="text-align: center; margin-bottom: 0;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: An angle \(\theta\) terminates in Quadrant III with \(\cos\theta = -\frac{12}{13}\). Find \(\sin\theta\). Work it before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\sin^2\theta = 1 - \frac{144}{169} = \frac{25}{169}\), so \(\sin\theta = \pm\frac{5}{13}\). Quadrant III has both coordinates negative, so \(\sin\theta = -\frac{5}{13}\). Another Pythagorean triple in disguise: \(5\text{-}12\text{-}13\).
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Evaluate \(\cos\frac{7\pi}{2}\) and \(\sin\frac{7\pi}{2}\) by first finding an equivalent angle in \([0, 2\pi)\).</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\frac{7\pi}{2} - 2\pi = \frac{3\pi}{2}\). So \(\cos\frac{7\pi}{2} = \cos\frac{3\pi}{2} = 0\) and \(\sin\frac{7\pi}{2} = \sin\frac{3\pi}{2} = -1\).
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Assuming cosine and sine are always positive, because right-triangle side <em>lengths</em> in Lesson 6-3 always were. On the unit circle, \(\cos\theta\) and \(\sin\theta\) are <em>coordinates</em>, and coordinates can be negative &mdash; a terminal point in Quadrant II, III, or IV has a negative \(x\)-value, a negative \(y\)-value, or both. Before writing a sign, always ask which quadrant the terminal side falls in; the Pythagorean identity gives you a magnitude, never a sign. Its twin mistake: forgetting the bound \(-1 \le \cos\theta, \sin\theta \le 1\) and accepting an "answer" like \(\sin\theta = 1.2\) &mdash; no point that far from the origin can lie on a circle of radius 1, so any calculation landing outside \([-1,1]\) has an arithmetic error hiding somewhere upstream.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Hipparchus tabulated <em>chords</em>, not sines &mdash; the straight segment connecting the two ends of an arc, rather than half of it. For a circle of radius \(R\) and central angle \(\theta\), the chord length is \(2R\sin\frac{\theta}{2}\): sine was hiding inside every entry of his table, twenty-two centuries before the word existed. That word has its own strange path: Indian astronomers called the half-chord <em>jya-ardha</em>; Arabic writers transliterated the sound as <em>jiba</em>; and when European translators later met that unfamiliar word written without vowels, they read it as the ordinary Arabic word <em>jaib</em>, meaning &ldquo;fold&rdquo; or &ldquo;bosom.&rdquo; They translated <em>that</em> word faithfully into Latin as <em>sinus</em> &mdash; and <em>sinus</em> became our &ldquo;sine.&rdquo; A translator's small mishearing, and the name stuck for a thousand years.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Sine and cosine just changed addresses &mdash; from a triangle's two acute angles to every real number on a circle. The old ratios still work exactly as before whenever a right triangle happens to be available; what is new is that they no longer need one. You located quadrantal points by inspection, recovered a missing coordinate from the identity \(\cos^2\theta + \sin^2\theta = 1\) plus a quadrant's sign, and used periodicity to fold huge angles back into a single lap. The reference card handed you today's coordinates in VR before you had earned them by proof. Tomorrow you earn them: two triangles, cut from a square and an equilateral triangle, will hand you every one of the special-angle values you just placed by hand &mdash; this time derived, not looked up.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. How does defining sine and cosine as coordinates on a circle free them from the right triangle's narrow domain of angles strictly between \(0\) and \(90°\)?</p>
+    <p>2. Why must \(\cos^2\theta + \sin^2\theta = 1\) hold for every single real number \(\theta\), and how is that fact simply the Pythagorean theorem refusing to let go?</p>
+    <p>3. What does it mean, geometrically, that winding \(2\pi\) radians further around the circle always returns you to a point you have already visited?</p>
+    <p>4. Hipparchus computed a table of chords by hand so that no one after him would have to. In what sense is precisely locating a coordinate &mdash; on a circle, or on a map &mdash; an act of responsibility?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">6-5 &middot; The Unit Circle: Sine and Cosine</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

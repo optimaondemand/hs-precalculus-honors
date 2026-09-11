@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 6-3</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 6</div>
+        <div style="font-size: 13px; color: #666;">Right Triangle Trigonometry</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">6-3</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Right Triangle Trigonometry</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">6-3</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Right Triangle Trigonometry</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to define sine, cosine, and tangent as ratios of sides in a right triangle (SOH-CAH-TOA).</p></li>
+        <li><p>I will be able to explain, using similar triangles, why these ratios depend only on the angle &mdash; never on the size of the triangle.</p></li>
+        <li><p>I will be able to find a missing side of a right triangle, given one side and one acute angle.</p></li>
+        <li><p>I will be able to find a missing acute angle of a right triangle, given two sides, using inverse trigonometric functions.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Hypotenuse</strong>: The side of a right triangle opposite the right angle &mdash; always the longest side, and the side every ratio in this lesson is measured against.</p>
+    <p><strong>Opposite side</strong>: For a chosen acute angle \(\theta\), the leg that does not touch \(\theta\) &mdash; the one "across the room" from it.</p>
+    <p><strong>Adjacent side</strong>: For that same angle \(\theta\), the leg that does touch \(\theta\) (and is not the hypotenuse).</p>
+    <p><strong>Sine, cosine, tangent</strong>: The three ratios \(\sin\theta = \frac{\text{opposite}}{\text{hypotenuse}}\), \(\cos\theta = \frac{\text{adjacent}}{\text{hypotenuse}}\), \(\tan\theta = \frac{\text{opposite}}{\text{adjacent}}\) &mdash; remembered by the mnemonic <strong>SOH-CAH-TOA</strong>.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>Hipparchus built his chord table because a fixed angle, he realized, always comes bundled with a fixed relationship between the sides of the triangle it sits inside &mdash; no matter how large or small you draw that triangle. Today you meet the modern, right-triangle version of exactly that insight, distilled into three ratios so useful that surveyors, sailors, and engineers have carried them in their pockets for well over two thousand years.</p>
+    <p>Here is the claim, stated plainly: draw a right triangle with one acute angle equal to \(\theta\). Measure the ratio of the leg opposite \(\theta\) to the hypotenuse. Now draw a completely different right triangle &mdash; bigger, smaller, rotated, it makes no difference &mdash; as long as it also has an acute angle of \(\theta\). Measure the same ratio. <strong>It comes out identical, every time.</strong> That single fact is what allows sine, cosine, and tangent to be genuine <em>functions</em> of an angle alone: whatever triangle you happen to draw disappears from the answer, and only \(\theta\) survives.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>Why the Ratios Don't Care About Size: Similar Triangles</strong></h4>
+        <p>Two right triangles that share an acute angle \(\theta\) automatically share <em>two</em> angles &mdash; that angle, and the right angle each one carries. By the <strong>Angle-Angle (AA) Similarity</strong> theorem, two triangles that agree on two angles are similar: same shape, possibly different size. And the defining property of similar triangles is that corresponding sides are all scaled by the same factor &mdash; so any <em>ratio</em> of two sides is unaffected by that scaling. It cancels out.</p>
+        <p style="margin-bottom: 0;">This is why \(\sin\theta\), \(\cos\theta\), and \(\tan\theta\) deserve to be called functions of \(\theta\) in the first place: for each value of \(\theta\), similar triangles guarantee there is exactly <em>one</em> value for each ratio, regardless of which triangle happens to be sitting in front of you.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1 &mdash; The Similarity Guarantee, Made Concrete</span></h4>
+    <p>Triangle A has legs 3 and 4 with hypotenuse 5. Triangle B has legs 6 and 8 with hypotenuse 10 &mdash; exactly twice the size. Both share the same acute angle \(\theta\) opposite the shorter leg. Show that \(\sin\theta\) comes out the same for both.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p style="text-align: center;">Triangle A: \(\sin\theta = \dfrac{3}{5} = 0.6\) &emsp;&emsp; Triangle B: \(\sin\theta = \dfrac{6}{10} = 0.6\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Both give \(\sin\theta = 0.6\), exactly as similar triangles predict. Doubling every side length doubled the numerator and the denominator together &mdash; and the 2's canceled. This is not a coincidence about these particular numbers; it is what "similar" always does to a ratio.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>In a right triangle, an acute angle measures \(32^\circ\) and the hypotenuse is 10 units. Find the lengths of the two legs.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Let the opposite leg be \(a\) and the adjacent leg be \(b\). By SOH-CAH:</p>
+    <p style="text-align: center;">\(\sin 32^\circ = \dfrac{a}{10} \;\Rightarrow\; a = 10\sin 32^\circ \approx 10(0.5299) \approx 5.30\)</p>
+    <p style="text-align: center;">\(\cos 32^\circ = \dfrac{b}{10} \;\Rightarrow\; b = 10\cos 32^\circ \approx 10(0.8480) \approx 8.48\)</p>
+    <p><strong>Check:</strong> the legs should satisfy the Pythagorean theorem: \(5.30^2 + 8.48^2 \approx 28.09 + 71.91 = 100.00 = 10^2\) &#10003;</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Opposite leg \(\approx 5.30\) units; adjacent leg \(\approx 8.48\) units.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>A right triangle has legs 7 and 24, with hypotenuse 25 (check: \(7^2 + 24^2 = 49 + 576 = 625 = 25^2\) &#10003;). Find both acute angles.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Let \(\theta\) be the angle opposite the side of length 7. Then \(\sin\theta = \dfrac{7}{25} = 0.28\), so</p>
+    <p style="text-align: center;">\(\theta = \sin^{-1}(0.28) \approx 16.26^\circ\)</p>
+    <p>The two acute angles of a right triangle must sum to \(90^\circ\), so the other angle is \(90^\circ - 16.26^\circ = 73.74^\circ\).</p>
+    <p><strong>Cross-check:</strong> using tangent instead, \(\tan\theta = \dfrac{7}{24} \approx 0.2917\), and \(\tan^{-1}(0.2917) \approx 16.26^\circ\) &mdash; the same answer, confirming the two ratios agree.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The acute angles are approximately \(16.26^\circ\) and \(73.74^\circ\).</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>Key Fact: Where Tangent Comes From</strong></h4>
+        <p>Tangent is not an independent idea &mdash; it is built entirely out of sine and cosine:</p>
+        <p style="text-align: center;">\(\dfrac{\sin\theta}{\cos\theta} = \dfrac{\text{opposite}/\text{hypotenuse}}{\text{adjacent}/\text{hypotenuse}} = \dfrac{\text{opposite}}{\text{adjacent}} = \tan\theta\)</p>
+        <p style="margin-bottom: 0;">The hypotenuse divides out of the compound fraction, leaving exactly the opposite-over-adjacent ratio. Keep this identity, \(\tan\theta = \dfrac{\sin\theta}{\cos\theta}\), close at hand &mdash; it will resurface constantly once the unit circle extends these ideas beyond right triangles next week.</p>
+    </div>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128187; On Your Calculator: Ratios In, Angles Out (and Back)</strong></h4>
+        <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 0;">6 min</span>
+        <p>At <a href="https://www.desmos.com/scientific">desmos.com/scientific</a> (the scientific calculator is the fastest tool for single trig evaluations; the full graphing calculator embed below also has a keyboard for this):</p>
+        <ol>
+            <li>Confirm the calculator is in <strong>degree mode</strong> for this lesson (check yesterday's Common Mistake box if you are unsure how). Type <strong>sin(32)</strong> and confirm you get \(\approx 0.5299\), matching Example 2.</li>
+            <li>Now go backward: type <strong>sin<sup>-1</sup>(0.28)</strong> (often the "2nd" or "shift" function on the sine key) and confirm you recover \(16.26^\circ\) from Example 3.</li>
+            <li>Try <strong>tan<sup>-1</sup>(7/24)</strong> directly, without simplifying the fraction first &mdash; most calculators accept the division inside the function call, and it should return the same \(16.26^\circ\).</li>
+        </ol>
+        <p style="text-align: center;"><iframe style="border: 1px solid #ccc;" title="Desmos graphing calculator" src="https://www.desmos.com/calculator" width="600" height="400" loading="lazy"></iframe></p>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: A right triangle has an acute angle of \(58^\circ\) and an adjacent leg of length 12. Find the hypotenuse and the opposite leg. Work it before you peek.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\cos 58^\circ = \frac{12}{h} \Rightarrow h = \frac{12}{\cos 58^\circ} \approx \frac{12}{0.5299} \approx 22.65\). Opposite leg: \(\tan 58^\circ = \frac{a}{12} \Rightarrow a = 12\tan 58^\circ \approx 12(1.6003) \approx 19.20\). Check: \(12^2 + 19.20^2 \approx 144 + 368.6 = 512.6\), and \(22.65^2 \approx 513.0\) &mdash; matching within rounding.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself (honors): Explain, without using a calculator, why \(\sin\theta\) can never be greater than 1 for an acute angle \(\theta\) in a right triangle.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            The hypotenuse is always the longest side of a right triangle &mdash; it is opposite the largest angle, the right angle. So the opposite leg, whatever it is, can never exceed the hypotenuse in length. Since \(\sin\theta = \frac{\text{opposite}}{\text{hypotenuse}}\) is a proper fraction with numerator no larger than its denominator, the ratio itself can never exceed 1. The same argument bounds \(\cos\theta\) by 1 as well &mdash; but places no such ceiling on \(\tan\theta\), since the two legs are not constrained relative to each other the way each leg is constrained relative to the hypotenuse.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Mixing up which leg is "opposite" when the labeled angle changes. In a right triangle with acute angles \(\alpha\) and \(\beta\), the leg that is <em>opposite</em> \(\alpha\) is the very same leg that is <em>adjacent</em> to \(\beta\) &mdash; a leg's job title depends entirely on which angle you have currently chosen to focus on. Before writing a single ratio, physically re-read the triangle from the vantage point of the specific angle named in the problem: which leg is directly across from it (opposite), and which leg forms one of its two sides along with the hypotenuse (adjacent)? Skipping this re-check is the single most common cause of a sine problem accidentally becoming a cosine problem.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The words "sine" and "cosine" both trace back, indirectly, to a translation accident. Hindu mathematicians used a Sanskrit word, <em>jya</em>, for a half-chord in a circle. Arabic translators rendered the sound as <em>jiba</em>, which has no meaning of its own in Arabic &mdash; but resembles the Arabic word <em>jaib</em>, meaning "bay" or "fold of a garment." A later Latin translator, working from the Arabic text, translated <em>jaib</em> literally, giving Latin <em>sinus</em> &mdash; "bay" or "curve" &mdash; which is exactly the word English inherited as "sine." A misheard word about a half-chord became the name of one of the most-used functions in all of mathematics.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Similar triangles are the quiet reason any of this works at all: a fixed angle locks in a fixed set of ratios, no matter what triangle happens to carry it, so sine, cosine, and tangent are genuinely functions of the angle alone. You can now move fluently between a triangle's sides and its angles in either direction &mdash; given an angle, find a side; given two sides, find an angle. Tomorrow those same three ratios leave the geometry classroom and step into the field: elevation, depression, and the surveyor's baseline, where a measured angle and a measured distance become a height or a distance no one could reach with a tape measure alone &mdash; and where getting the angle right is no longer just a matter of grade, but of responsibility.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. Why does AA similarity guarantee that \(\sin\theta\) has exactly one value for a given angle \(\theta\), regardless of which right triangle you draw?</p>
+    <p>2. If you double every side length of a right triangle, what happens to \(\sin\theta\), \(\cos\theta\), and \(\tan\theta\)? Explain why using the ratio itself, not just "because it's true."</p>
+    <p>3. Explain, in your own words, why \(\tan\theta = \dfrac{\sin\theta}{\cos\theta}\) &mdash; what cancels, and why?</p>
+    <p>4. Why can \(\sin\theta\) and \(\cos\theta\) never exceed 1 for an acute angle, while \(\tan\theta\) has no such ceiling?</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">6-3 &middot; Right Triangle Trigonometry</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>

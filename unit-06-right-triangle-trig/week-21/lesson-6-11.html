@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precalculus Honors — Lesson 6-11</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+<style>
+    body { margin: 0; padding: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6fa; }
+    .canvas-frame { max-width: 1100px; margin: 0 auto; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="canvas-frame">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIMA READ-ALOUD PLAYER — drop-in snippet for GitHub-hosted lesson pages
+     ═══════════════════════════════════════════════════════════════════════
+
+     WHAT IT DOES
+       Adds a "Listen" player that reads the page aloud using the browser's
+       built-in Web Speech API (no accounts, no API keys, works offline once
+       the page is loaded). The paragraph currently being read is highlighted
+       in pale gold and scrolled into view. Works inside a Canvas iframe.
+
+     WHERE TO PASTE
+       Into any GitHub-hosted Optima lesson page (the full-HTML-document kind,
+       NOT Canvas RCE pages — the RCE strips <script>). Paste this whole block
+       just inside the body wrapper, right BEFORE the first content card.
+
+     OPTIONS
+       • Add  data-ra-skip  to any element the reader should NOT read
+         (e.g. the local preview banner, decorative text, answer keys).
+       • Add  data-readaloud-root  to one container to limit reading to it.
+         Default scope: the .canvas-frame wrapper, else <body>.
+
+     NOTES
+       • The player never reads itself, <button> labels, or hidden elements
+         (so unrevealed widget feedback stays unread until shown).
+       • If the browser has no speech voices, the player disables itself
+         with a friendly message instead of breaking the page.
+-->
+<div id="optima-read-aloud">
+<style>
+    #optima-read-aloud { background: linear-gradient(135deg, #E8F6FB 0%, #F4F9FC 100%); border: 1px solid #C5DCE5; border-left: 5px solid #2196D0; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; }
+    #optima-read-aloud .ora-kicker { font-size: 11px; color: #1B6A94; letter-spacing: 0.4px; margin-bottom: 10px; }
+    #optima-read-aloud .ora-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #optima-read-aloud .ora-controls button { border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    #ora-play { background: #0E1C42; color: #FFFFFF; border: 1.5px solid #0E1C42; }
+    #ora-play:hover:enabled { background: #1B2D5E; }
+    #ora-play:disabled { background: #D0D9E8; border-color: #D0D9E8; color: #6b7a99; cursor: default; }
+    #ora-stop { background: #FFFFFF; color: #0E1C42; border: 1.5px solid #D0D9E8; }
+    #ora-stop:hover:enabled { background: #F4F6FA; border-color: #55C8E8; }
+    #ora-stop:disabled { color: #999; border-color: #E4E9F2; cursor: default; }
+    #optima-read-aloud .ora-speed { font-size: 12px; color: #6b7a99; display: flex; align-items: center; gap: 6px; }
+    #ora-rate { font-family: inherit; font-size: 13px; color: #0E1C42; border: 1.5px solid #D0D9E8; border-radius: 6px; padding: 5px 8px; background: #FFFFFF; }
+    #ora-status { font-size: 12px; color: #666; }
+    .ora-highlight { background: #FDF3E3 !important; box-shadow: inset 4px 0 0 #C7922C; border-radius: 4px; transition: background 0.2s; }
+</style>
+    <div class="ora-kicker">&#128266; READ ALOUD &mdash; LISTEN TO THIS PAGE</div>
+    <div class="ora-controls">
+        <button id="ora-play" type="button" aria-label="Listen to this page">&#9654;&#65039; Listen</button>
+        <button id="ora-stop" type="button" aria-label="Stop reading" disabled>&#9632; Stop</button>
+        <label class="ora-speed">Speed
+            <select id="ora-rate" aria-label="Reading speed">
+                <option value="0.8">Slower</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.25">Faster</option>
+            </select>
+        </label>
+        <span id="ora-status" role="status" aria-live="polite"></span>
+    </div>
+<script>
+(function () {
+    "use strict";
+    var playBtn  = document.getElementById("ora-play");
+    var stopBtn  = document.getElementById("ora-stop");
+    var rateSel  = document.getElementById("ora-rate");
+    var statusEl = document.getElementById("ora-status");
+
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        playBtn.disabled = true;
+        rateSel.disabled = true;
+        statusEl.textContent = "Read-aloud is not supported in this browser.";
+        return;
+    }
+
+    var LABEL_PLAY   = "▶️ Listen";
+    var LABEL_PAUSE  = "⏸️ Pause";
+    var LABEL_RESUME = "▶️ Resume";
+    var BLOCK_SEL = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, dt, dd, figcaption, div";
+    var SKIP_SEL  = "#optima-read-aloud, [data-ra-skip], button, script, style, select, noscript, iframe";
+
+    var queue = [];        // [{ el, text }] — one entry per sentence
+    var idx = 0;
+    var playing = false, paused = false, stopping = false;
+    var currentBlock = null;
+    var currentUtterance = null;  // held to dodge a Chrome garbage-collection bug
+
+    var voices = [];
+    function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+    loadVoices();
+    if ("onvoiceschanged" in window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    function pickVoice() {
+        if (!voices.length) loadVoices();
+        var en = voices.filter(function (v) { return /^en/i.test(v.lang); });
+        return en.filter(function (v) { return /natural/i.test(v.name); })[0]
+            || en.filter(function (v) { return /google us english/i.test(v.name); })[0]
+            || en.filter(function (v) { return v.default; })[0]
+            || en[0] || null;
+    }
+
+    function isVisible(el) {
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    // Walk text nodes, attach each to its nearest block ancestor, split into sentences.
+    function collectQueue() {
+        var root = document.querySelector("[data-readaloud-root]")
+                || document.querySelector(".canvas-frame")
+                || document.body;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        var items = [];   // [{ el, text }] — one entry per block, in reading order
+        var node;
+        while ((node = walker.nextNode())) {
+            if (!/\S/.test(node.textContent)) continue;
+            var el = node.parentElement;
+            if (!el || el.closest(SKIP_SEL)) continue;
+            if (!isVisible(el)) continue;
+            var block = el.closest(BLOCK_SEL) || root;
+            var last = items[items.length - 1];
+            if (last && last.el === block) last.text += " " + node.textContent;
+            else items.push({ el: block, text: node.textContent });
+        }
+        var q = [];
+        items.forEach(function (item) {
+            var clean = item.text.replace(/\s+/g, " ").trim();
+            if (!clean) return;
+            var sentences = clean.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [clean];
+            sentences.forEach(function (s) {
+                s = s.trim();
+                if (s) q.push({ el: item.el, text: s });
+            });
+        });
+        return q;
+    }
+
+    function highlight(el) {
+        if (el === currentBlock) return;
+        clearHighlight();
+        currentBlock = el;
+        if (el && el !== document.body) {
+            el.classList.add("ora-highlight");
+            try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+        }
+    }
+    function clearHighlight() {
+        if (currentBlock) currentBlock.classList.remove("ora-highlight");
+        currentBlock = null;
+    }
+
+    function speakNext() {
+        if (idx >= queue.length) { finish("Finished reading this page."); return; }
+        var item = queue[idx];
+        highlight(item.el);
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.rate = parseFloat(rateSel.value) || 1;
+        var v = pickVoice();
+        if (v) u.voice = v;
+        u.onend = function () {
+            if (stopping) return;
+            idx++;
+            speakNext();
+        };
+        u.onerror = function (e) {
+            if (stopping || e.error === "canceled" || e.error === "interrupted") return;
+            idx++;
+            speakNext();
+        };
+        currentUtterance = u;
+        window.speechSynthesis.speak(u);
+        statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+    }
+
+    function finish(message) {
+        playing = false;
+        paused = false;
+        clearHighlight();
+        playBtn.textContent = LABEL_PLAY;
+        stopBtn.disabled = true;
+        statusEl.textContent = message || "";
+        currentUtterance = null;
+    }
+
+    playBtn.addEventListener("click", function () {
+        if (playing && !paused) {
+            window.speechSynthesis.pause();
+            paused = true;
+            playBtn.textContent = LABEL_RESUME;
+            statusEl.textContent = "Paused";
+            return;
+        }
+        if (playing && paused) {
+            window.speechSynthesis.resume();
+            paused = false;
+            playBtn.textContent = LABEL_PAUSE;
+            statusEl.textContent = "Reading… " + (idx + 1) + " / " + queue.length;
+            return;
+        }
+        queue = collectQueue();
+        if (!queue.length) { statusEl.textContent = "Nothing to read on this page."; return; }
+        idx = 0;
+        stopping = false;
+        playing = true;
+        paused = false;
+        window.speechSynthesis.cancel();
+        playBtn.textContent = LABEL_PAUSE;
+        stopBtn.disabled = false;
+        speakNext();
+    });
+
+    stopBtn.addEventListener("click", function () {
+        stopping = true;
+        window.speechSynthesis.cancel();
+        finish("");
+    });
+
+    // Changing speed mid-read restarts the current sentence at the new rate.
+    rateSel.addEventListener("change", function () {
+        if (!playing || paused) return;
+        stopping = true;
+        window.speechSynthesis.cancel();
+        setTimeout(function () { stopping = false; speakNext(); }, 60);
+    });
+
+    window.addEventListener("pagehide", function () { window.speechSynthesis.cancel(); });
+})();
+</script>
+</div>
+<!-- ═══ END OPTIMA READ-ALOUD PLAYER ═══ -->
+
+<div style="background: #0E1C42; border-bottom: 5px solid #55C8E8; padding: 22px 34px;">
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><img src="https://raw.githubusercontent.com/optimaondemand/optima-assets/eeb0b335630058906d52f478028361d352253a93/images/Optima%20Final%20Circle%20-%20Owl%20Only.png" alt="Optima Academy" style="width: 50px; height: 40px; object-fit: contain;" /></div>
+        <div>
+            <div style="font-size: 28px; color: #ffffff; line-height: 1.2;">Optima Academy Online</div>
+            <div style="font-size: 12px; color: #55c8e8;">An Education Experience Company</div>
+        </div>
+    </div>
+    <div style="font-size: 36px; color: #ffffff; margin-bottom: 6px;">PRECALCULUS HONORS</div>
+</div>
+
+<div style="background: #FFFFFF; border-bottom: 2px solid #D0D9E8; display: flex; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Quarter / Unit</div>
+        <div style="font-size: 18px; color: #0e1c42;">Q3 &middot; Unit 6</div>
+        <div style="font-size: 13px; color: #666;">Right Triangle Trigonometry</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px; border-right: 1px solid #D0D9E8;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Lesson</div>
+        <div style="font-size: 18px; color: #0e1c42;">6-11</div>
+    </div>
+    <div style="flex: 1; min-width: 150px; padding: 12px 16px;">
+        <div style="font-size: 11px; color: #6b7a99; margin-bottom: 4px;">Unit Theme</div>
+        <div style="font-size: 16px; color: #0e1c42;">Right Triangle Trigonometry</div>
+    </div>
+</div>
+
+<div style="padding: 24px 34px;">
+
+<div style="background: #EEF1F8; border-left: 5px solid #0E1C42; border-radius: 7px; padding: 18px 22px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #0e1c42; margin-bottom: 8px;">6-11</div>
+    <div style="font-size: 22px; color: #0e1c42; margin-bottom: 6px;">Trigonometry in the Field (Unit Synthesis)</div>
+    <div style="font-size: 15px; color: #666;">Lesson</div>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#127919; LEARNING OBJECTIVES</div>
+    <ul>
+        <li><p>I will be able to solve multi-step navigation and surveying problems that combine right-triangle ratios, the unit circle, and reference angles.</p></li>
+        <li><p>I will be able to convert a compass heading into a standard-position angle correctly, and use reference angles to find the signed displacement components it produces.</p></li>
+        <li><p>I will be able to document a field computation to a professional standard &mdash; declared setup, every step shown, units carried throughout, and a check that the answer is physically reasonable.</p></li>
+    </ul>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128218; VOCABULARY</div>
+    <p><strong>Angle of elevation / depression</strong>: The angle between a horizontal line of sight and a line of sight up to a higher object (elevation) or down to a lower one (depression). The two are equal by alternate interior angles whenever the sightlines connect the same two points.</p>
+    <p><strong>Bearing / heading</strong>: A direction expressed as an angle measured <em>clockwise from north</em>, from \(0^\circ\) to \(360^\circ\) &mdash; the convention navigators and surveyors actually use, and different from the standard-position angle (measured counterclockwise from the positive \(x\)-axis, i.e., from east) that the unit circle uses.</p>
+    <p><strong>Heading-to-standard conversion</strong>: The formula \(\theta_{\text{standard}} = 90^\circ - \text{heading} \pmod{360^\circ}\), which translates a compass heading into the angle the unit circle actually expects &mdash; because north sits at standard-position \(90^\circ\), not \(0^\circ\).</p>
+    <p><strong>Traverse</strong>: A surveyed path made of straight legs, each with its own distance and heading, whose total displacement is found by adding up every leg's east&ndash;west and north&ndash;south components separately &mdash; exactly the kind of running total a spreadsheet is built for.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#128161; EXPLORING THE MATH</div>
+
+    <p>In 1792, two French astronomers set out to measure the exact distance from Dunkirk to Barcelona, along the meridian that runs through Paris &mdash; not out of idle curiosity, but because the newly proposed metric system needed a definition of the meter that belonged to no king and no nation: one ten-millionth of the distance from the North Pole to the equator. Jean-Baptiste Delambre and Pierre M&eacute;chain spent seven years carrying that responsibility across a war-torn countryside, station by station, each leg of the survey a triangle solved by the same right-triangle trigonometry you have spent this unit learning. A single sloppy angle, uncaught, would have propagated through every triangle after it and quietly corrupted a unit of measure the whole world still uses today. Their work is the origin of this unit's virtue in its purest form: <strong>responsibility</strong> is not a feeling a surveyor has about their work; it is the documented, checkable trail of reasoning that lets someone else trust a number they did not compute themselves. Today you carry that same trail &mdash; right-triangle ratios, the unit circle, and reference angles, all three, in the field.</p>
+
+    <div style="background-color: #e6f4ff; border-left: 5px solid #007acc; padding: 15px; margin: 10px 0; border-radius: 12px; font-family: sans-serif;">
+        <h4 style="color: #007acc; margin-top: 0;"><strong>From Compass Heading to the Unit Circle</strong></h4>
+        <p>A navigator's heading is measured clockwise from north; the unit circle's standard position is measured counterclockwise from east. The two systems do not line up by accident &mdash; you must convert on purpose, every time:</p>
+        <p style="text-align: center;">\(\theta_{\text{standard}} = 90^\circ - \text{heading} \pmod{360^\circ}\)</p>
+        <p style="margin-bottom: 0;">Once converted, the displacement after traveling distance \(d\) on that heading has an <strong>eastward component</strong> \(d\cos\theta_{\text{standard}}\) and a <strong>northward component</strong> \(d\sin\theta_{\text{standard}}\) &mdash; negative values meaning west or south, exactly as ASTC's sign pattern dictates for whatever quadrant \(\theta_{\text{standard}}\) lands in. Skip the conversion, and every downstream sign and quadrant is wrong &mdash; a heading is not a standard-position angle, no matter how tempting it is to treat it as one.</p>
+    </div>
+
+    <h4><span style="color: #f67a0c;">Example 1</span></h4>
+    <p>A surveyor stands at a point and measures the angle of elevation to the top of a tower as \(35^\circ\). She then walks \(40\) m directly away from the tower and measures the angle of elevation again: \(20^\circ\). Find the height of the tower.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>Let \(x\) be the (unknown) distance from the <em>first</em> point to the base, and \(h\) the tower's height. From the first point, \(\tan 35^\circ = \dfrac{h}{x}\); from the second point, \(40\) m farther back, \(\tan 20^\circ = \dfrac{h}{x + 40}\). Both equations describe the <em>same</em> height \(h\) &mdash; solve them together, not separately:</p>
+    <p style="text-align: center;">\(h = x\tan 35^\circ = (x + 40)\tan 20^\circ\)</p>
+    <p style="text-align: center;">\(x(\tan 35^\circ - \tan 20^\circ) = 40\tan 20^\circ\)</p>
+    <p style="text-align: center;">\(x(0.7002 - 0.3640) = 40(0.3640) \;\;\Rightarrow\;\; x(0.3362) = 14.559 \;\;\Rightarrow\;\; x \approx 43.30 \text{ m}\)</p>
+    <p style="text-align: center;">\(h = x\tan 35^\circ \approx 43.30(0.7002) \approx 30.32 \text{ m}\)</p>
+    <p><span style="color: #e62429;"><strong>Verify:</strong></span> from the second point, \((x+40)\tan 20^\circ = 83.30(0.3640) \approx 30.32\) m &mdash; matches.</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The tower is approximately \(30.3\) m tall. Notice why one equation alone was never enough: either measurement, taken by itself, has an unknown distance <em>and</em> an unknown height &mdash; two unknowns need two equations, exactly the system-solving discipline of a two-station sight.</p>
+
+    <h4><span style="color: #f67a0c;">Example 2</span></h4>
+    <p>A ship holds a compass heading of \(250^\circ\) for \(200\) nautical miles. Find its eastward and northward displacement components.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p><strong>Convert first.</strong> \(\theta_{\text{standard}} = 90^\circ - 250^\circ = -160^\circ\), which is coterminal with \(-160^\circ + 360^\circ = 200^\circ\).</p>
+    <p><strong>Locate and reduce.</strong> \(200^\circ\) is Quadrant III; reference angle \(= 200^\circ - 180^\circ = 20^\circ\). QIII: both cosine and sine are negative.</p>
+    <p style="text-align: center;">\(\cos 200^\circ = -\cos 20^\circ \approx -0.9397 \qquad \sin 200^\circ = -\sin 20^\circ \approx -0.3420\)</p>
+    <p style="text-align: center;">\(\text{east component} = 200(-0.9397) \approx -187.9 \text{ nm} \qquad \text{north component} = 200(-0.3420) \approx -68.4 \text{ nm}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> The ship moves about \(187.9\) nm <em>west</em> and \(68.4\) nm <em>south</em> (the negative signs telling direction, not error). Sanity check: a heading of \(250^\circ\) sits between due west (\(270^\circ\)) and due south (\(180^\circ\)), closer to west &mdash; and the components agree, with the westward leg far larger than the southward one. A displacement that came out mostly northward would have signaled a conversion mistake before a single sign was checked.</p>
+
+    <h4><span style="color: #f67a0c;">Example 3</span></h4>
+    <p>An aircraft flies at a constant altitude of \(3.2\) km. It spots two boats along the same line of flight: the angle of depression to the nearer boat is \(52^\circ\), and to the farther boat, \(29^\circ\). Find the distance between the boats.</p>
+    <p><span style="color: #e62429;"><strong>Solution:</strong></span></p>
+    <p>The angle of depression from the plane equals the angle of elevation from each boat, so each boat's horizontal distance from the point directly below the aircraft satisfies \(\tan(\text{angle}) = \dfrac{\text{altitude}}{\text{horizontal distance}}\), giving horizontal distance \(= \dfrac{\text{altitude}}{\tan(\text{angle})}\):</p>
+    <p style="text-align: center;">\(d_{\text{near}} = \dfrac{3.2}{\tan 52^\circ} \approx \dfrac{3.2}{1.2799} \approx 2.500 \text{ km} \qquad d_{\text{far}} = \dfrac{3.2}{\tan 29^\circ} \approx \dfrac{3.2}{0.5543} \approx 5.773 \text{ km}\)</p>
+    <p><span style="color: #e62429;"><strong>Answer:</strong></span> Distance between the boats \(= d_{\text{far}} - d_{\text{near}} \approx 5.773 - 2.500 \approx 3.27\) km. The steeper angle belongs to the <em>nearer</em> boat, and the shallower angle to the farther one &mdash; if your two distances came out reversed, the labeling of near and far is the first place to look.</p>
+
+    <div style="border: 3px solid #3C8C4C; background-color: #dff5e1; padding: 20px; border-radius: 8px; margin: 14px 0;">
+        <h4 style="color: #3c8c4c; margin-top: 0;"><strong>&#128202; In Excel: The Traverse Table</strong> <span style="display: inline-block; background: #C7922C; color: #ffffff; font-size: 13px; padding: 2px 12px; border-radius: 10px; margin-left: 8px;">10 min</span></h4>
+        <p>A hiking traverse runs three legs: \(500\) m on heading \(070^\circ\); \(350\) m on heading \(140^\circ\); \(620\) m on heading \(200^\circ\). Build the surveyor's table in Excel, one row per leg:</p>
+        <p>Columns: <strong>Leg</strong> &middot; <strong>Distance</strong> &middot; <strong>Heading</strong> &middot; <strong>Standard angle</strong> <code>=90-C2</code> (add 360 if negative) &middot; <strong>East component</strong> <code>=B2*COS(RADIANS(D2))</code> &middot; <strong>North component</strong> <code>=B2*SIN(RADIANS(D2))</code>. A final row sums the two component columns.</p>
+        <p>Working it: Leg 1 (\(20^\circ\), QI) gives \((+469.8, +171.0)\); Leg 2 (\(310^\circ\), QIV, reference \(50^\circ\)) gives \((+225.0, -268.1)\); Leg 3 (\(250^\circ\), QIII, reference \(70^\circ\)) gives \((-212.0, -582.6)\). Totals: east \(\approx 482.9\) m, north \(\approx -679.7\) m (i.e., \(679.7\) m <em>south</em>). Net displacement \(= \sqrt{482.9^2 + 679.7^2} \approx 833.7\) m, at a compass bearing of about \(144.6^\circ\) (mostly southeast, since the southward leg dominates the eastward one).</p>
+        <p style="margin-bottom: 0;">This is the professional standard in miniature: every leg's angle converted the same declared way, every component computed by an identical formula copied down the column, and a final total that a second surveyor could recompute from your table alone &mdash; without ever asking you a clarifying question. (If you save the workbook, name it <strong>LastName_FirstName_Traverse_Precalculus.xlsx</strong> in <strong>Optima &rarr; Math &rarr; PrecalculusHonors</strong>.)</p>
+    </div>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; AI CHECKPOINT: THE UNCONVERTED HEADING</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">
+            <p style="margin-top: 0;">A student asked an AI to find the eastward and northward components of a \(400\) m displacement on heading \(155^\circ\). It answered:</p>
+            <p style="font-style: italic; background: #ffffff; border-radius: 6px; padding: 10px 14px;">&ldquo;East component = 400&middot;cos(155&deg;) &asymp; &minus;362.5 m. North component = 400&middot;sin(155&deg;) &asymp; 169.0 m. So the displacement is about 362.5 m west and 169.0 m north.&rdquo;</p>
+            <p>The arithmetic is flawless &mdash; but the AI fed the <em>heading</em> directly into cosine and sine as if it were already a standard-position angle, skipping the conversion \(\theta_{\text{standard}} = 90^\circ - 155^\circ = -65^\circ \equiv 295^\circ\) entirely. Sanity check the claim first: a heading of \(155^\circ\) lies between due east (\(90^\circ\)) and due south (\(180^\circ\)) &mdash; the ship should move <em>southeast</em>. "West and north" is not southeast; it is nearly the opposite direction.</p>
+            <p>The corrected standard angle is \(295^\circ\) (QIV, reference angle \(65^\circ\)): \(\cos 295^\circ = \cos 65^\circ \approx 0.4226\), \(\sin 295^\circ = -\sin 65^\circ \approx -0.9063\). East component \(= 400(0.4226) \approx 169.0\) m; north component \(= 400(-0.9063) \approx -362.5\) m &mdash; that is, \(169.0\) m east and \(362.5\) m south.</p>
+            <p style="margin-bottom: 0;">Notice the AI's two numbers, \(362.5\) and \(169.0\), are exactly the <em>correct</em> magnitudes &mdash; just attached to the wrong directions entirely, because the conversion step was silently skipped. In fieldwork this is not an academic slip: a survey crew that trusted this output would have walked the wrong way. Before accepting any displacement calculation &mdash; yours or a machine's &mdash; ask first whether the heading was actually converted to standard position, and second whether the resulting direction makes physical sense.</p>
+        </div>
+    </div>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: From a point 60 m from a flagpole's base, the angle of elevation to the top is 38&deg;. Find the flagpole's height.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(h = 60\tan 38^\circ \approx 60(0.7813) \approx 46.9\) m.
+        </div>
+    </details>
+
+    <details style="background: #FFFFFF; border: 1px solid #D0D9E8; border-left: 4px solid #C7922C; border-radius: 6px; padding: 12px 18px; margin: 14px 0;">
+        <summary style="font-size: 16px; color: #0E1C42; cursor: pointer; list-style: none;"><span style="color: #C7922C;">&#9654;</span>&nbsp; Try it yourself: Convert a compass heading of 310&deg; to standard position, name its quadrant and reference angle, and find the sign of both displacement components.</summary>
+        <div style="font-size: 17px; color: #1a2340; line-height: 1.6; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF1F8;">
+            \(\theta_{\text{standard}} = 90^\circ - 310^\circ = -220^\circ \equiv 140^\circ\) (add \(360^\circ\)). \(140^\circ\) is QII, reference angle \(40^\circ\). QII: cosine negative, sine positive &mdash; so the east component is negative (a westward displacement) and the north component is positive, matching the intuition that heading \(310^\circ\) points mostly northwest.
+        </div>
+    </details>
+
+    <div style="background: #FDECEC; border-left: 5px solid #C0392B; border-top: 3px solid #E74C3C; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #8A1F16; margin-bottom: 8px;">&#9888;&#65039; COMMON MISTAKE</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">Feeding a compass heading straight into cosine and sine without converting to standard position first &mdash; exactly the AI's error above. A heading and a standard-position angle are measured from different starting rays (north vs. east) and rotate in opposite directions (clockwise vs. counterclockwise); treating them as interchangeable produces numbers of the <em>right size</em> attached to the <em>wrong direction</em>, which is often more dangerous than an obviously wrong answer because it looks plausible until someone checks it against a compass.</div>
+    </div>
+
+    <div style="background: #E8F6FB; border-left: 5px solid #2196D0; border-top: 3px solid #55C8E8; border-radius: 6px; padding: 14px 20px; margin: 14px 0;">
+        <div style="font-size: 11px; color: #1B6A94; margin-bottom: 8px;">&#128161; DID YOU KNOW?</div>
+        <div style="font-size: 17px; color: #0E1C42; line-height: 1.6;">The meter Delambre and M&eacute;chain's survey produced was later found to be off by about a fifth of a millimeter per meter &mdash; not because their trigonometry was wrong, but because the Earth is not a perfect sphere, an error in the assumed <em>model</em>, not the mathematics applied to it. The metal bar cast to represent their result, the <em>M&egrave;tre des Archives</em>, nonetheless defined the meter for the better part of a century. Even an imperfect model, honestly documented, can serve for generations &mdash; which is exactly why this unit has insisted, all along, on showing the work behind every number.</div>
+    </div>
+
+    <h4><strong>Conclusion</strong></h4>
+    <p>Every tool this unit built &mdash; the right-triangle ratios of 6-3 and 6-4, the unit circle of 6-5 through 6-8, the reference angles and complete circle of 6-9 and 6-10 &mdash; met the field today in a single documented computation: a tower's height pinned down by two sightlines, a ship's true position recovered from a compass heading, an aircraft's two boats separated by a difference of horizontal distances. None of it works, and none of it can be trusted by a stranger, without the declared setup and the checked reasonableness that this lesson's Focus assignment asks you to bring. On Thursday, the Unit 6 test gathers the whole arc into one sitting. And beyond it, this unit's coordinates &mdash; the \((\cos\theta, \sin\theta)\) pairs you generated from three seeds &mdash; are about to become something new: next unit, you will watch those same \(y\)-coordinates traced out one angle at a time, and discover that they draw a wave.</p>
+</div>
+
+<div style="background: #FFFFFF; border-top: 3px solid #C7922C; border: 1px solid #D0D9E8; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #c7922c; margin-bottom: 14px;">&#10067; ESSENTIAL QUESTIONS</div>
+    <p>1. In the two-station elevation problem, why must the two equations be solved together rather than treating each sighting as its own independent problem?</p>
+    <p>2. Why does converting a compass heading to standard position require the specific formula \(\theta = 90^\circ - \text{heading}\), and what physically goes wrong if that conversion is skipped?</p>
+    <p>3. What does "document work to a professional standard" mean concretely in a surveyor's traverse table, and why does the presentation-and-precision criterion of your rubric matter more here than in a purely academic exercise?</p>
+    <p>4. Name one moment in today's lesson where each of this unit's three big ideas &mdash; right-triangle ratios, the unit circle, and reference angles &mdash; was doing real work inside a single problem.</p>
+</div>
+
+</div>
+
+<div style="background: #0E1C42; border-top: 3px solid #55C8E8; padding: 18px 34px; text-align: center;">
+    <div style="font-size: 18px; color: #ffffff; margin-bottom: 6px;"><span style="color: #55c8e8;">Optima Academy Online</span> &middot; PRECALCULUS HONORS &middot; Quarter 3 &middot; Student Lesson Page</div>
+    <div style="font-size: 13px; color: rgba(255,255,255,0.65); margin-bottom: 4px;">6-11 &middot; Trigonometry in the Field (Unit Synthesis)</div>
+    <div style="font-size: 12px; color: rgba(255,255,255,0.4);">&copy; Optima Academy Online &middot; An Education Experience Company</div>
+</div>
+
+</div>
+</body>
+</html>
